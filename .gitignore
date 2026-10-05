@@ -1,0 +1,25 @@
+# ==========================================
+# Local Blizzard References (Inspection Only)
+# ==========================================
+/BlizzardInterfaceArt/
+/BlizzardInterfaceCode/
+
+# ==========================================
+# Build Artifacts & Historical Releases
+# ==========================================
+/zips/
+/changelogs/
+
+# ==========================================
+# OS & Editor Metadata
+# ==========================================
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
+.vscode/
+.idea/
+
+Build-Realease.ps1
+agents.md
+agent.md
