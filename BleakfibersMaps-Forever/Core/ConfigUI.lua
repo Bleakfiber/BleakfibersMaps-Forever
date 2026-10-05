@@ -238,3 +238,134 @@ function BFM:ToggleConfigUI()
         configFrame:Show()
     end
 end
+
+function BFM:BuildEmbedUI(parent)
+    if not parent then return end
+
+    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, -16)
+    title:SetText("|cff00c0ffBleakfiber's Maps|r Settings")
+
+    local subtitle = parent:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    subtitle:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+    subtitle:SetText("Configure square minimap, position, scaling, and quest indicators.")
+
+    local yOffset = -56
+
+    local cbUnlock = CreateCheckbox(parent, "Unlock Minimap (Click & Drag to Move)", "Allows clicking and dragging the minimap freely across the screen. Also supports Alt+Drag anytime.", function(checked)
+        BFM.db.minimap.unlocked = checked
+        BFM:ApplySettings()
+    end)
+    cbUnlock:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 32
+    local cbQuest = CreateCheckbox(parent, "Square Quest Zone Indicator", "Conforms the quest objective boundary to the square bounds of the minimap, suppressing the round ring.", function(checked)
+        BFM.db.minimap.questIndicator = checked
+        BFM:ApplySettings()
+    end)
+    cbQuest:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 32
+    local cbIcons = CreateCheckbox(parent, "Follow Square Minimap Perimeter", "Constrains addon buttons to the square edges of the minimap instead of orbiting circularly.", function(checked)
+        BFM.db.minimap.squareIcons = checked
+        BFM:ApplySettings()
+    end)
+    cbIcons:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 32
+    local cbDiel = CreateCheckbox(parent, "Hide Day/Night Cycle (DielFrame)", "Hides the sun and moon dial texture docked to the MinimapCluster.", function(checked)
+        BFM.db.minimap.hideDielFrame = checked
+        BFM:ApplySettings()
+    end)
+    cbDiel:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 32
+    local cbMinimapCoords = CreateCheckbox(parent, "Show Minimap Coordinates & Subzone Bar", "Displays live player coordinates and reactive subzone text at the bottom of the minimap.", function(checked)
+        BFM.db.minimap.showCoords = checked
+        BFM:ApplySettings()
+    end)
+    cbMinimapCoords:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 32
+    local cbZoom = CreateCheckbox(parent, "Enable Minimap Mouse Wheel Zoom", "Allows scrolling up and down on the minimap to zoom in and out with clamped boundaries.", function(checked)
+        BFM.db.minimap.enableMouseWheelZoom = checked
+        BFM:ApplySettings()
+    end)
+    cbZoom:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 32
+    local cbWorldCoords = CreateCheckbox(parent, "Show World Map Coordinate Overlay", "Displays live player and cursor-hover coordinates at the bottom of the World Map canvas.", function(checked)
+        BFM.db.worldmap.showCoords = checked
+        BFM:ApplySettings()
+    end)
+    cbWorldCoords:SetPoint("TOPLEFT", parent, "TOPLEFT", 20, yOffset)
+
+    yOffset = yOffset - 40
+    local sizeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    sizeLabel:SetPoint("TOPLEFT", parent, "TOPLEFT", 22, yOffset)
+    sizeLabel:SetText("Minimap Size (Pixels):")
+
+    local sizeSlider = CreateFrame("Slider", "BFM_MasterMinimapSizeSlider", parent, "OptionsSliderTemplate")
+    sizeSlider:SetPoint("TOPLEFT", sizeLabel, "BOTTOMLEFT", 4, -14)
+    sizeSlider:SetWidth(170)
+    sizeSlider:SetMinMaxValues(100, 260)
+    sizeSlider:SetValueStep(5)
+    sizeSlider:SetObeyStepOnDrag(true)
+    _G[sizeSlider:GetName() .. "Low"]:SetText("100")
+    _G[sizeSlider:GetName() .. "High"]:SetText("260")
+    sizeSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value + 0.5)
+        _G[self:GetName() .. "Text"]:SetText(tostring(value))
+        BFM.db.minimap.size = value
+        BFM:ApplySettings()
+    end)
+
+    local borderLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    borderLabel:SetPoint("LEFT", sizeLabel, "LEFT", 200, 0)
+    borderLabel:SetText("Border Thickness:")
+
+    local borderSlider = CreateFrame("Slider", "BFM_MasterBorderThicknessSlider", parent, "OptionsSliderTemplate")
+    borderSlider:SetPoint("TOPLEFT", borderLabel, "BOTTOMLEFT", 4, -14)
+    borderSlider:SetWidth(150)
+    borderSlider:SetMinMaxValues(1, 5)
+    borderSlider:SetValueStep(1)
+    borderSlider:SetObeyStepOnDrag(true)
+    _G[borderSlider:GetName() .. "Low"]:SetText("1")
+    _G[borderSlider:GetName() .. "High"]:SetText("5")
+    borderSlider:SetScript("OnValueChanged", function(self, value)
+        value = math.floor(value + 0.5)
+        _G[self:GetName() .. "Text"]:SetText(tostring(value))
+        BFM.db.minimap.borderSize = value
+        BFM:ApplySettings()
+    end)
+
+    local resetBtn = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    resetBtn:SetSize(130, 22)
+    resetBtn:SetPoint("TOPLEFT", sizeSlider, "BOTTOMLEFT", 0, -20)
+    resetBtn:SetText("Reset Position")
+    resetBtn:SetScript("OnClick", function()
+        BFM:ResetPosition()
+        print("|cff00c0ffBleakfiber's Maps|r: Minimap position reset to default.")
+    end)
+
+    local function SyncValues()
+        cbUnlock:SetChecked(BFM.db.minimap.unlocked == true)
+        cbQuest:SetChecked(BFM.db.minimap.questIndicator ~= false)
+        cbIcons:SetChecked(BFM.db.minimap.squareIcons ~= false)
+        cbDiel:SetChecked(BFM.db.minimap.hideDielFrame ~= false)
+        cbMinimapCoords:SetChecked(BFM.db.minimap.showCoords ~= false)
+        cbZoom:SetChecked(BFM.db.minimap.enableMouseWheelZoom ~= false)
+        cbWorldCoords:SetChecked(BFM.db.worldmap.showCoords ~= false)
+        local curS = BFM.db.minimap.size or 140
+        sizeSlider:SetValue(curS)
+        _G[sizeSlider:GetName() .. "Text"]:SetText(tostring(curS))
+        local curB = BFM.db.minimap.borderSize or 1
+        borderSlider:SetValue(curB)
+        _G[borderSlider:GetName() .. "Text"]:SetText(tostring(curB))
+    end
+
+    SyncValues()
+    parent:HookScript("OnShow", SyncValues)
+    parent.refresh = SyncValues
+end
+

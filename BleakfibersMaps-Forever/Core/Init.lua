@@ -1,5 +1,9 @@
 local addonName, BFM = ...
 
+-- Expose global API
+BleakfibersMapsForever = BleakfibersMapsForever or BFM
+_G["BleakfibersMapsForever"] = BleakfibersMapsForever
+
 BFM.Title = "Bleakfiber's Maps"
 BFM.Version = "1.0.02"
 BFM.modules = {}
@@ -16,17 +20,75 @@ function GetMinimapShape()
     return "SQUARE"
 end
 
+-- Public method to re-apply all visual settings in real time
+function BleakfibersMapsForever:ApplySettings()
+    local squareModule = self.modules["SquareMinimap"]
+    if squareModule then
+        if squareModule.UpdateBorder then squareModule:UpdateBorder() end
+        if squareModule.UpdateDielFrame then squareModule:UpdateDielFrame() end
+        if squareModule.ScanMinimapButtons then squareModule:ScanMinimapButtons() end
+        if squareModule.SetMinimapSize and BFM.db and BFM.db.minimap and BFM.db.minimap.size then
+            squareModule:SetMinimapSize(BFM.db.minimap.size)
+        end
+        if squareModule.UpdateMoveOverlay then squareModule:UpdateMoveOverlay() end
+        if squareModule.UpdateQuestZoneIndicator then squareModule:UpdateQuestZoneIndicator() end
+        if squareModule.PositionClock then squareModule:PositionClock() end
+    end
+
+    local coordsModule = self.modules["MinimapCoords"]
+    if coordsModule then
+        if coordsModule.UpdateVisibility then coordsModule:UpdateVisibility() end
+        if coordsModule.UpdateLayout then coordsModule:UpdateLayout() end
+    end
+
+    local worldMapModule = self.modules["WorldMapCoords"]
+    if worldMapModule and worldMapModule.UpdateVisibility then
+        worldMapModule:UpdateVisibility()
+    end
+end
+
+function BleakfibersMapsForever:ResetPosition()
+    local squareModule = self.modules["SquareMinimap"]
+    if squareModule and squareModule.ResetPosition then
+        squareModule:ResetPosition()
+    end
+end
+
+-- Master Config Addon Registration
+function BleakfibersMapsForever:RegisterWithMasterConfig()
+    if BleakfibersAddonConfigForever and type(BleakfibersAddonConfigForever.RegisterModule) == "function" then
+        BleakfibersAddonConfigForever:RegisterModule("BleakfibersMapsForever", {
+            name = "Bleakfiber's Maps",
+            db = BleakfibersMapsDB,
+            refresh = function()
+                BleakfibersMapsForever:ApplySettings()
+            end,
+            buildUI = function(parentContainer)
+                if BFM.BuildEmbedUI then
+                    BFM:BuildEmbedUI(parentContainer)
+                end
+            end,
+        })
+    end
+end
+
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
-    if event == "ADDON_LOADED" and arg1 == addonName then
-        BFM:InitDB()
-        for _, module in pairs(BFM.modules) do
-            if type(module.OnInitialize) == "function" then
-                module:OnInitialize()
+    if event == "ADDON_LOADED" then
+        if arg1 == addonName then
+            BFM:InitDB()
+            _G["BleakfibersMapsDB"] = BleakfibersMapsDB
+            for _, module in pairs(BFM.modules) do
+                if type(module.OnInitialize) == "function" then
+                    module:OnInitialize()
+                end
             end
+            BleakfibersMapsForever:RegisterWithMasterConfig()
+        elseif arg1 == "BleakfibersAddonConfigForever" then
+            BleakfibersMapsForever:RegisterWithMasterConfig()
         end
     elseif event == "PLAYER_LOGIN" then
         for _, module in pairs(BFM.modules) do
@@ -34,6 +96,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                 module:OnEnable()
             end
         end
+        BleakfibersMapsForever:RegisterWithMasterConfig()
     end
 end)
 
@@ -48,16 +111,19 @@ SlashCmdList["BLEAKFIBERSMAPS"] = function(msg)
     local prefix = "|cff00c0ffBleakfiber's Maps|r:"
 
     if cmd == "" or cmd == "config" or cmd == "options" or cmd == "menu" then
-        BFM:ToggleConfigUI()
+        if BleakfibersAddonConfigForever and type(BleakfibersAddonConfigForever.OpenModule) == "function" then
+            BleakfibersAddonConfigForever:OpenModule("BleakfibersMapsForever")
+        elseif BleakfibersAddonConfigForever and type(BleakfibersAddonConfigForever.Open) == "function" then
+            BleakfibersAddonConfigForever:Open("BleakfibersMapsForever")
+        else
+            BFM:ToggleConfigUI()
+        end
     elseif cmd == "unlock" or cmd == "move" then
         BFM.db.minimap.unlocked = not BFM.db.minimap.unlocked
         BFM:NotifySettingsChanged("unlocked")
         print(string.format("%s Minimap Unlocked (Click & Drag) set to %s", prefix, tostring(BFM.db.minimap.unlocked)))
     elseif cmd == "resetpos" then
-        local squareMod = BFM.modules["SquareMinimap"]
-        if squareMod and squareMod.ResetPosition then
-            squareMod:ResetPosition()
-        end
+        BleakfibersMapsForever:ResetPosition()
         print(string.format("%s Minimap position reset to default.", prefix))
     elseif cmd == "size" then
         local num = tonumber(arg)

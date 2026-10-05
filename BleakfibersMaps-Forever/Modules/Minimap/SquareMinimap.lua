@@ -100,15 +100,28 @@ function SquareMinimap:StripDefaultArtwork()
 
     if MinimapCluster then
         if MinimapCluster.BorderTop then
+            MinimapCluster.BorderTop.ignoreInLayout = true
+            MinimapCluster.BorderTop:ClearAllPoints()
+            MinimapCluster.BorderTop:SetPoint("CENTER", Minimap, "CENTER", 0, 0)
             table.insert(framesToStrip, MinimapCluster.BorderTop)
         end
         if MinimapCluster.ZoneTextButton then
+            MinimapCluster.ZoneTextButton.ignoreInLayout = true
+            MinimapCluster.ZoneTextButton:ClearAllPoints()
+            MinimapCluster.ZoneTextButton:SetPoint("CENTER", Minimap, "CENTER", 0, 0)
             table.insert(framesToStrip, MinimapCluster.ZoneTextButton)
         end
         if MinimapCluster.Tracking and MinimapCluster.Tracking.Background then
             StripTexture(MinimapCluster.Tracking.Background)
         end
+        if MinimapCluster.MinimapContainer then
+            MinimapCluster.MinimapContainer:ClearAllPoints()
+            MinimapCluster.MinimapContainer:SetPoint("CENTER", MinimapCluster, "CENTER", 0, 0)
+        end
+        MinimapCluster:SetClampRectInsets(0, 0, 0, 0)
+        MinimapCluster:SetHitRectInsets(0, 0, 0, 0)
     end
+
 
     if Minimap then
         if Minimap.ZoomIn then table.insert(framesToStrip, Minimap.ZoomIn) end
@@ -457,7 +470,55 @@ function SquareMinimap:PositionElements()
         GameTimeFrame:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", 2, 2)
         GameTimeFrame:SetScale(0.8)
     end
+
+    self:PositionClock()
 end
+
+function SquareMinimap:PositionClock()
+    local clockBtn = TimeManagerClockButton
+    if not clockBtn then
+        if not self.timeManagerWatcher then
+            local watcher = CreateFrame("Frame")
+            watcher:RegisterEvent("ADDON_LOADED")
+            watcher:SetScript("OnEvent", function(f, event, name)
+                if name == "Blizzard_TimeManager" or TimeManagerClockButton then
+                    SquareMinimap:PositionClock()
+                    f:UnregisterAllEvents()
+                end
+            end)
+            self.timeManagerWatcher = watcher
+        end
+        return
+    end
+
+    clockBtn.ignoreInLayout = true
+    clockBtn:SetParent(Minimap)
+    clockBtn:SetFrameLevel(Minimap:GetFrameLevel() + 15)
+    clockBtn:ClearAllPoints()
+    clockBtn:SetPoint("TOP", Minimap, "TOP", 0, -2)
+    clockBtn:SetScale(0.85)
+
+    if not clockBtn.bfmBg then
+        local bg = clockBtn:CreateTexture(nil, "BACKGROUND")
+        bg:SetPoint("TOPLEFT", clockBtn, "TOPLEFT", 4, -1)
+        bg:SetPoint("BOTTOMRIGHT", clockBtn, "BOTTOMRIGHT", -2, 1)
+        bg:SetColorTexture(0, 0, 0, 0.55)
+        clockBtn.bfmBg = bg
+    end
+
+    if not self.clockHooked then
+        hooksecurefunc(clockBtn, "SetPoint", function(self, point, relTo)
+            if not SquareMinimap.isPositioningClock and relTo ~= Minimap then
+                SquareMinimap.isPositioningClock = true
+                self:ClearAllPoints()
+                self:SetPoint("TOP", Minimap, "TOP", 0, -2)
+                SquareMinimap.isPositioningClock = false
+            end
+        end)
+        self.clockHooked = true
+    end
+end
+
 
 -- 8. Square Minimap Icon Projection
 function SquareMinimap:ProjectButtonToSquare(button)
