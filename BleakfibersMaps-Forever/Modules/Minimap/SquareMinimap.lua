@@ -116,10 +116,13 @@ function SquareMinimap:StripDefaultArtwork()
         end
         if MinimapCluster.MinimapContainer then
             MinimapCluster.MinimapContainer:ClearAllPoints()
-            MinimapCluster.MinimapContainer:SetPoint("CENTER", MinimapCluster, "CENTER", 0, 0)
+            MinimapCluster.MinimapContainer:SetAllPoints(MinimapCluster)
         end
-        MinimapCluster:SetClampRectInsets(0, 0, 0, 0)
+        Minimap:ClearAllPoints()
+        Minimap:SetAllPoints(MinimapCluster.MinimapContainer or MinimapCluster)
+        MinimapCluster:SetClampRectInsets(0, 0, -20, 0)
         MinimapCluster:SetHitRectInsets(0, 0, 0, 0)
+        MinimapCluster:SetClampedToScreen(true)
     end
 
 
@@ -302,19 +305,48 @@ end
 
 function SquareMinimap:SetMinimapSize(size)
     if not size or size < 80 then size = 140 end
+    if size > 512 then size = 512 end
     BFM.db.minimap.size = size
 
-    Minimap:SetSize(size, size)
-    if MinimapCluster and MinimapCluster.MinimapContainer then
-        MinimapCluster.MinimapContainer:SetSize(size, size)
+    if MinimapCluster then
+        MinimapCluster:SetSize(size, size)
+        if MinimapCluster.SetFixedSize then
+            pcall(MinimapCluster.SetFixedSize, MinimapCluster, size, size)
+        end
+        MinimapCluster.fixedWidth = size
+        MinimapCluster.fixedHeight = size
+        MinimapCluster.widthPadding = 0
+        MinimapCluster.heightPadding = 0
+        MinimapCluster.ignoreAllChildren = true
+        MinimapCluster:SetClampRectInsets(0, 0, -20, 0)
+        MinimapCluster:SetHitRectInsets(0, 0, 0, 0)
+        MinimapCluster:SetClampedToScreen(true)
+
+        if MinimapCluster.MinimapContainer then
+            MinimapCluster.MinimapContainer:ClearAllPoints()
+            MinimapCluster.MinimapContainer:SetAllPoints(MinimapCluster)
+            MinimapCluster.MinimapContainer:SetSize(size, size)
+        end
     end
+
+    Minimap:ClearAllPoints()
+    if MinimapCluster and MinimapCluster.MinimapContainer then
+        Minimap:SetAllPoints(MinimapCluster.MinimapContainer)
+    elseif MinimapCluster then
+        Minimap:SetAllPoints(MinimapCluster)
+    end
+    Minimap:SetSize(size, size)
+
     if MinimapBackdrop then
+        MinimapBackdrop:ClearAllPoints()
+        MinimapBackdrop:SetAllPoints(Minimap)
         MinimapBackdrop:SetSize(size, size)
     end
 
     self:RefreshMinimapTexture()
     self:UpdateBorder()
     self:PositionElements()
+    self:PositionClock()
     self:ScanMinimapButtons()
 
     local coordsModule = BFM.modules["MinimapCoords"]
@@ -386,6 +418,8 @@ function SquareMinimap:CreateMoveOverlay()
     text:SetJustifyH("CENTER")
 
     moveOverlay:SetScript("OnDragStart", function()
+        MinimapCluster:SetMovable(true)
+        MinimapCluster:SetClampRectInsets(0, 0, -20, 0)
         MinimapCluster:StartMoving()
     end)
     moveOverlay:SetScript("OnDragStop", function()
@@ -396,6 +430,8 @@ function SquareMinimap:CreateMoveOverlay()
     -- Also allow Alt-drag directly on Minimap even when locked
     Minimap:HookScript("OnMouseDown", function(self, button)
         if button == "LeftButton" and (IsAltKeyDown() or (BFM.db and BFM.db.minimap and BFM.db.minimap.unlocked)) then
+            MinimapCluster:SetMovable(true)
+            MinimapCluster:SetClampRectInsets(0, 0, -20, 0)
             MinimapCluster:StartMoving()
             SquareMinimap.isMinimapDragging = true
         end
@@ -656,6 +692,53 @@ function SquareMinimap:OnEnable()
             end
         end)
         self.positionHooked = true
+    end
+
+    if MinimapCluster and not self.layoutHooked then
+        if MinimapCluster.Layout then
+            hooksecurefunc(MinimapCluster, "Layout", function(cluster)
+                local s = BFM.db and BFM.db.minimap and BFM.db.minimap.size or 140
+                cluster:SetSize(s, s)
+                cluster.fixedWidth = s
+                cluster.fixedHeight = s
+                cluster.widthPadding = 0
+                cluster.heightPadding = 0
+                cluster:SetClampRectInsets(0, 0, -20, 0)
+                if cluster.MinimapContainer then
+                    cluster.MinimapContainer:ClearAllPoints()
+                    cluster.MinimapContainer:SetAllPoints(cluster)
+                    cluster.MinimapContainer:SetSize(s, s)
+                end
+                Minimap:ClearAllPoints()
+                Minimap:SetAllPoints(cluster.MinimapContainer or cluster)
+                Minimap:SetSize(s, s)
+            end)
+        end
+        self.layoutHooked = true
+    end
+
+    if MinimapCluster and MinimapCluster.MinimapContainer and not self.containerHooked then
+        hooksecurefunc(MinimapCluster.MinimapContainer, "SetPoint", function(container)
+            if not SquareMinimap.isReanchoringContainer then
+                SquareMinimap.isReanchoringContainer = true
+                container:ClearAllPoints()
+                container:SetAllPoints(MinimapCluster)
+                SquareMinimap.isReanchoringContainer = false
+            end
+        end)
+        self.containerHooked = true
+    end
+
+    if Minimap and not self.minimapPointHooked then
+        hooksecurefunc(Minimap, "SetPoint", function(m)
+            if not SquareMinimap.isReanchoringMinimap then
+                SquareMinimap.isReanchoringMinimap = true
+                m:ClearAllPoints()
+                m:SetAllPoints(MinimapCluster and MinimapCluster.MinimapContainer or MinimapCluster)
+                SquareMinimap.isReanchoringMinimap = false
+            end
+        end)
+        self.minimapPointHooked = true
     end
 
     Minimap:HookScript("OnEnter", function()

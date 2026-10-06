@@ -8,7 +8,7 @@
 ## IconTexture: Interface\Icons\INV_Misc_Map02
 ## X-License: Restricted - Source Available (All Rights Reserved, No Derivatives)
 ## X-Website: https://github.com/Bleakfiber/BleakfibersMaps-Forever
-## OptionalDeps: BleakfibersAddonConfigForever
+## OptionalDeps: BleakfibersAddonConfig-Forever, BleakfibersAddonConfigForever
 
 
 Locales\enUS.lua

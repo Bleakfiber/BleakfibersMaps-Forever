@@ -22,6 +22,15 @@ local defaultSettings = {
         overlayHeight = 22,
         backdropColor = { r = 0, g = 0, b = 0, a = 0.65 },
     },
+    configWindow = {
+        width = 760,
+        height = 520,
+        point = "CENTER",
+        relativePoint = "CENTER",
+        xOfs = 0,
+        yOfs = 0,
+        lastTab = "minimap",
+    },
 }
 
 function BFM:InitDB()

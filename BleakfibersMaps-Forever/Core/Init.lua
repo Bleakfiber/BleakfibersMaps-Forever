@@ -56,25 +56,56 @@ end
 
 -- Master Config Addon Registration
 function BleakfibersMapsForever:RegisterWithMasterConfig()
-    if BleakfibersAddonConfigForever and type(BleakfibersAddonConfigForever.RegisterModule) == "function" then
-        BleakfibersAddonConfigForever:RegisterModule("BleakfibersMapsForever", {
-            name = "Bleakfiber's Maps",
-            db = BleakfibersMapsDB,
-            refresh = function()
-                BleakfibersMapsForever:ApplySettings()
-            end,
-            buildUI = function(parentContainer)
-                if BFM.BuildEmbedUI then
-                    BFM:BuildEmbedUI(parentContainer)
+    local BAC = _G["BleakfibersAddonConfigForever"] or _G["BleakfibersAddonConfig"]
+    if not (BAC and type(BAC.RegisterModule) == "function") then
+        return false
+    end
+
+    local moduleData = {
+        id = "BleakfibersMaps",
+        name = "Maps",
+        version = BFM.Version or "1.0.02",
+        db = _G["BleakfibersMapsDB"] or BFM.db,
+        getDB = function() return _G["BleakfibersMapsDB"] or BFM.db end,
+        refresh = function()
+            BleakfibersMapsForever:ApplySettings()
+        end,
+        openStandalone = function()
+            BFM:ShowConfigUI()
+        end,
+        buildUI = function(parentContainer)
+            if BFM.BuildEmbedUI then
+                BFM:BuildEmbedUI(parentContainer)
+            end
+        end,
+    }
+
+    local success = BAC:RegisterModule("BleakfibersMaps", moduleData)
+    if success and BAC.modules and not BAC.modules["BleakfibersMapsForever"] then
+        BAC.modules["BleakfibersMapsForever"] = moduleData
+    end
+    return success
+end
+
+local function HookBAC()
+    local BAC = _G["BleakfibersAddonConfigForever"] or _G["BleakfibersAddonConfig"]
+    if BAC and not BFM.hasHookedBAC then
+        BFM.hasHookedBAC = true
+        if BAC.RefreshSidebar then
+            hooksecurefunc(BAC, "RefreshSidebar", function()
+                if not BAC.modules or not BAC.modules["BleakfibersMaps"] then
+                    BleakfibersMapsForever:RegisterWithMasterConfig()
                 end
-            end,
-        })
+            end)
+        end
     end
 end
 
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
+eventFrame:RegisterEvent("VARIABLES_LOADED")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
     if event == "ADDON_LOADED" then
@@ -87,9 +118,14 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
                 end
             end
             BleakfibersMapsForever:RegisterWithMasterConfig()
-        elseif arg1 == "BleakfibersAddonConfigForever" then
+            HookBAC()
+        elseif arg1 == "BleakfibersAddonConfig-Forever" or arg1 == "BleakfibersAddonConfigForever" then
             BleakfibersMapsForever:RegisterWithMasterConfig()
+            HookBAC()
         end
+    elseif event == "VARIABLES_LOADED" then
+        BleakfibersMapsForever:RegisterWithMasterConfig()
+        HookBAC()
     elseif event == "PLAYER_LOGIN" then
         for _, module in pairs(BFM.modules) do
             if type(module.OnEnable) == "function" then
@@ -97,6 +133,15 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             end
         end
         BleakfibersMapsForever:RegisterWithMasterConfig()
+        HookBAC()
+        if _G["SlashCmdList"] and SlashCmdList["BLEAKFIBERSCONFIG"] then
+            hooksecurefunc(SlashCmdList, "BLEAKFIBERSCONFIG", function()
+                BleakfibersMapsForever:RegisterWithMasterConfig()
+            end)
+        end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        BleakfibersMapsForever:RegisterWithMasterConfig()
+        HookBAC()
     end
 end)
 
@@ -111,13 +156,7 @@ SlashCmdList["BLEAKFIBERSMAPS"] = function(msg)
     local prefix = "|cff00c0ffBleakfiber's Maps|r:"
 
     if cmd == "" or cmd == "config" or cmd == "options" or cmd == "menu" then
-        if BleakfibersAddonConfigForever and type(BleakfibersAddonConfigForever.OpenModule) == "function" then
-            BleakfibersAddonConfigForever:OpenModule("BleakfibersMapsForever")
-        elseif BleakfibersAddonConfigForever and type(BleakfibersAddonConfigForever.Open) == "function" then
-            BleakfibersAddonConfigForever:Open("BleakfibersMapsForever")
-        else
-            BFM:ToggleConfigUI()
-        end
+        BFM:ToggleConfigUI()
     elseif cmd == "unlock" or cmd == "move" then
         BFM.db.minimap.unlocked = not BFM.db.minimap.unlocked
         BFM:NotifySettingsChanged("unlocked")
@@ -127,12 +166,12 @@ SlashCmdList["BLEAKFIBERSMAPS"] = function(msg)
         print(string.format("%s Minimap position reset to default.", prefix))
     elseif cmd == "size" then
         local num = tonumber(arg)
-        if num and num >= 80 and num <= 300 then
+        if num and num >= 80 and num <= 512 then
             BFM.db.minimap.size = num
             BFM:NotifySettingsChanged("size")
             print(string.format("%s Minimap size set to %d px", prefix, num))
         else
-            print(string.format("%s Usage: /bfm size <100-260>", prefix))
+            print(string.format("%s Usage: /bfm size <100-512>", prefix))
         end
     elseif cmd == "quest" or cmd == "questindicator" then
         BFM.db.minimap.questIndicator = not BFM.db.minimap.questIndicator
