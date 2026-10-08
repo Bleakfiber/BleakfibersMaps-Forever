@@ -176,3 +176,4 @@ Bleakfiber's Maps integrates seamlessly with the entire **Bleakfiber Addon Suite
 * **License**: Restricted - Source-Available (All Rights Reserved, No Derivatives). See [LICENSE.md](LICENSE.md) for full terms.
 * **Issues & Feedback**: Encounter a bug or have a feature request? Open an issue on our [GitHub Issue Tracker](https://github.com/Bleakfiber/BleakfibersMaps-Forever/issues).
 * **Author**: Bleakfiber
+
