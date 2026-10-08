@@ -2,7 +2,7 @@
 ## Title: |cff00c0ffBleakfiber's Maps|r - |cffffd100Forever|r
 ## Notes: An enhanced, lightweight map and square minimap suite designed for World of Warcraft: Forever.
 ## Author: Bleakfiber
-## Version: 1.0.02
+## Version: 1.0.05
 ## SavedVariables: BleakfibersMapsDB
 
 ## IconTexture: Interface\Icons\INV_Misc_Map02
@@ -20,3 +20,5 @@ Core\Init.lua
 Modules\Minimap\SquareMinimap.lua
 Modules\Minimap\MinimapCoords.lua
 Modules\WorldMap\WorldMapCoords.lua
+Modules\WorldMap\WorldMapFogData.lua
+Modules\WorldMap\WorldMapFog.lua

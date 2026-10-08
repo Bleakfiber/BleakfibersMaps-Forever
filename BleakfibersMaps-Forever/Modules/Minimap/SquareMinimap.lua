@@ -246,35 +246,81 @@ function SquareMinimap:UpdateBorder()
     if not borderFrame then return end
 
     local cfg = BFM.db.minimap
+    local style = cfg.borderStyle or "flat"
     local thickness = cfg.borderSize or 1
     local bc = cfg.borderColor or BFM.Constants.DEFAULT_BORDER_COLOR
     local bg = cfg.backdropColor or BFM.Constants.DEFAULT_BACKDROP_COLOR
 
+    if cfg.classColorBorder then
+        local _, classFileName = UnitClass("player")
+        local classColor = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[classFileName]) or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFileName])
+        if classColor then
+            bc = { r = classColor.r, g = classColor.g, b = classColor.b, a = bc.a or 1 }
+        end
+    end
+
     backdropTexture:SetColorTexture(bg.r, bg.g, bg.b, bg.a)
 
-    borderTextures.top:ClearAllPoints()
-    borderTextures.top:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -thickness, thickness)
-    borderTextures.top:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", thickness, thickness)
-    borderTextures.top:SetHeight(thickness)
-    borderTextures.top:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+    if style == "none" then
+        borderTextures.top:Hide()
+        borderTextures.bottom:Hide()
+        borderTextures.left:Hide()
+        borderTextures.right:Hide()
+        if borderFrame.backdropFrame then borderFrame.backdropFrame:Hide() end
+    elseif style == "tooltip" or style == "dialog" then
+        borderTextures.top:Hide()
+        borderTextures.bottom:Hide()
+        borderTextures.left:Hide()
+        borderTextures.right:Hide()
 
-    borderTextures.bottom:ClearAllPoints()
-    borderTextures.bottom:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", -thickness, -thickness)
-    borderTextures.bottom:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", thickness, -thickness)
-    borderTextures.bottom:SetHeight(thickness)
-    borderTextures.bottom:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+        if not borderFrame.backdropFrame then
+            local bf = CreateFrame("Frame", nil, borderFrame, BackdropTemplateMixin and "BackdropTemplate" or nil)
+            bf:SetFrameLevel(borderFrame:GetFrameLevel() + 2)
+            borderFrame.backdropFrame = bf
+        end
+        local edgeFile = (style == "dialog") and "Interface\\DialogFrame\\UI-DialogBox-Border" or "Interface\\Tooltips\\UI-Tooltip-Border"
+        local edgeSize = (style == "dialog") and 16 or 14
+        local inset = (style == "dialog") and 4 or 3
+        borderFrame.backdropFrame:ClearAllPoints()
+        borderFrame.backdropFrame:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -inset, inset)
+        borderFrame.backdropFrame:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", inset, -inset)
+        borderFrame.backdropFrame:SetBackdrop({
+            edgeFile = edgeFile,
+            edgeSize = edgeSize,
+        })
+        borderFrame.backdropFrame:SetBackdropBorderColor(bc.r, bc.g, bc.b, bc.a)
+        borderFrame.backdropFrame:Show()
+    else -- "flat"
+        if borderFrame.backdropFrame then borderFrame.backdropFrame:Hide() end
+        borderTextures.top:Show()
+        borderTextures.bottom:Show()
+        borderTextures.left:Show()
+        borderTextures.right:Show()
 
-    borderTextures.left:ClearAllPoints()
-    borderTextures.left:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -thickness, thickness)
-    borderTextures.left:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", -thickness, -thickness)
-    borderTextures.left:SetWidth(thickness)
-    borderTextures.left:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+        borderTextures.top:ClearAllPoints()
+        borderTextures.top:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -thickness, thickness)
+        borderTextures.top:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", thickness, thickness)
+        borderTextures.top:SetHeight(thickness)
+        borderTextures.top:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
 
-    borderTextures.right:ClearAllPoints()
-    borderTextures.right:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", thickness, thickness)
-    borderTextures.right:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", thickness, -thickness)
-    borderTextures.right:SetWidth(thickness)
-    borderTextures.right:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+        borderTextures.bottom:ClearAllPoints()
+        borderTextures.bottom:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", -thickness, -thickness)
+        borderTextures.bottom:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", thickness, -thickness)
+        borderTextures.bottom:SetHeight(thickness)
+        borderTextures.bottom:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+
+        borderTextures.left:ClearAllPoints()
+        borderTextures.left:SetPoint("TOPLEFT", Minimap, "TOPLEFT", -thickness, thickness)
+        borderTextures.left:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", -thickness, -thickness)
+        borderTextures.left:SetWidth(thickness)
+        borderTextures.left:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+
+        borderTextures.right:ClearAllPoints()
+        borderTextures.right:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", thickness, thickness)
+        borderTextures.right:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", thickness, -thickness)
+        borderTextures.right:SetWidth(thickness)
+        borderTextures.right:SetColorTexture(bc.r, bc.g, bc.b, bc.a)
+    end
 
     self:UpdateQuestZoneIndicator()
 end
@@ -372,16 +418,21 @@ end
 function SquareMinimap:RestorePosition()
     if not MinimapCluster then return end
     local pos = BFM.db and BFM.db.minimap and BFM.db.minimap.position
+    self.isPositioning = true
+    MinimapCluster:SetMovable(true)
+    MinimapCluster:ClearAllPoints()
     if pos and pos.point and pos.x and pos.y then
-        self.isPositioning = true
-        MinimapCluster:SetMovable(true)
-        MinimapCluster:ClearAllPoints()
         MinimapCluster:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x, pos.y)
         if MinimapCluster.SetUserPlaced then
             pcall(MinimapCluster.SetUserPlaced, MinimapCluster, true)
         end
-        self.isPositioning = false
+    else
+        MinimapCluster:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -10, -10)
+        if MinimapCluster.SetUserPlaced then
+            pcall(MinimapCluster.SetUserPlaced, MinimapCluster, false)
+        end
     end
+    self.isPositioning = false
 end
 
 function SquareMinimap:ResetPosition()
@@ -456,6 +507,21 @@ function SquareMinimap:UpdateMoveOverlay()
     end
 end
 
+function SquareMinimap:ToggleMovers(state)
+    if not BFM.db or not BFM.db.minimap then return false end
+    if state ~= nil then
+        BFM.db.minimap.unlocked = state
+    else
+        BFM.db.minimap.unlocked = not BFM.db.minimap.unlocked
+    end
+    self:UpdateMoveOverlay()
+    return BFM.db.minimap.unlocked
+end
+
+function SquareMinimap:IsMoversUnlocked()
+    return (BFM.db and BFM.db.minimap and BFM.db.minimap.unlocked == true) or false
+end
+
 -- 6. Mouse Wheel Zoom
 function SquareMinimap:SetupMouseWheelZoom()
     Minimap:EnableMouseWheel(true)
@@ -480,11 +546,14 @@ end
 
 -- 7. Positioning Interface Elements
 function SquareMinimap:PositionElements()
+    local trackerScale = (BFM.db and BFM.db.minimap and BFM.db.minimap.trackerScale) or 0.85
+    local calendarScale = (BFM.db and BFM.db.minimap and BFM.db.minimap.calendarScale) or 0.80
+
     local trackingFrame = (MinimapCluster and MinimapCluster.Tracking) or MiniMapTracking or MiniMapTrackingFrame
     if trackingFrame then
         trackingFrame:ClearAllPoints()
         trackingFrame:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 2, -2)
-        trackingFrame:SetScale(0.85)
+        trackingFrame:SetScale(trackerScale)
     end
 
     local mailFrame = (MinimapCluster and MinimapCluster.IndicatorFrame) or MiniMapMailFrame
@@ -504,7 +573,7 @@ function SquareMinimap:PositionElements()
     if GameTimeFrame then
         GameTimeFrame:ClearAllPoints()
         GameTimeFrame:SetPoint("TOPRIGHT", Minimap, "TOPRIGHT", 2, 2)
-        GameTimeFrame:SetScale(0.8)
+        GameTimeFrame:SetScale(calendarScale)
     end
 
     self:PositionClock()
@@ -527,12 +596,14 @@ function SquareMinimap:PositionClock()
         return
     end
 
+    local timeScale = (BFM.db and BFM.db.minimap and BFM.db.minimap.timeScale) or 0.85
+
     clockBtn.ignoreInLayout = true
     clockBtn:SetParent(Minimap)
     clockBtn:SetFrameLevel(Minimap:GetFrameLevel() + 15)
     clockBtn:ClearAllPoints()
     clockBtn:SetPoint("TOP", Minimap, "TOP", 0, -2)
-    clockBtn:SetScale(0.85)
+    clockBtn:SetScale(timeScale)
 
     if not clockBtn.bfmBg then
         local bg = clockBtn:CreateTexture(nil, "BACKGROUND")

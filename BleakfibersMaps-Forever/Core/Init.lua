@@ -5,7 +5,7 @@ BleakfibersMapsForever = BleakfibersMapsForever or BFM
 _G["BleakfibersMapsForever"] = BleakfibersMapsForever
 
 BFM.Title = "Bleakfiber's Maps"
-BFM.Version = "1.0.02"
+BFM.Version = "1.0.05"
 BFM.modules = {}
 
 function BFM:RegisterModule(name, module)
@@ -32,6 +32,7 @@ function BleakfibersMapsForever:ApplySettings()
         end
         if squareModule.UpdateMoveOverlay then squareModule:UpdateMoveOverlay() end
         if squareModule.UpdateQuestZoneIndicator then squareModule:UpdateQuestZoneIndicator() end
+        if squareModule.PositionElements then squareModule:PositionElements() end
         if squareModule.PositionClock then squareModule:PositionClock() end
     end
 
@@ -45,6 +46,11 @@ function BleakfibersMapsForever:ApplySettings()
     if worldMapModule and worldMapModule.UpdateVisibility then
         worldMapModule:UpdateVisibility()
     end
+
+    local fogModule = self.modules["WorldMapFog"]
+    if fogModule and fogModule.Refresh then
+        fogModule:Refresh()
+    end
 end
 
 function BleakfibersMapsForever:ResetPosition()
@@ -54,7 +60,43 @@ function BleakfibersMapsForever:ResetPosition()
     end
 end
 
--- Master Config Addon Registration
+--[[-----------------------------------------------------------------------------
+    Unified Movers Contract
+-------------------------------------------------------------------------------]]
+function BleakfibersMapsForever:ToggleMovers(state)
+    local squareModule = self.modules["SquareMinimap"]
+    if squareModule and squareModule.ToggleMovers then
+        return squareModule:ToggleMovers(state)
+    end
+    return false
+end
+
+function BleakfibersMapsForever:IsMoversUnlocked()
+    local squareModule = self.modules["SquareMinimap"]
+    if squareModule and squareModule.IsMoversUnlocked then
+        return squareModule:IsMoversUnlocked()
+    end
+    return false
+end
+
+function BleakfibersMapsForever:ResetMovers()
+    self:ResetPosition()
+end
+
+local function RegisterGlobalMovers()
+    _G.Bleakfibers_MoversRegistry = _G.Bleakfibers_MoversRegistry or {}
+    _G.Bleakfibers_MoversRegistry["BleakfibersMaps"] = {
+        name = "Bleakfiber's Maps",
+        sidebarName = "Maps",
+        Toggle = function(state) return BleakfibersMapsForever:ToggleMovers(state) end,
+        Reset = function() BleakfibersMapsForever:ResetMovers() end,
+        IsUnlocked = function() return BleakfibersMapsForever:IsMoversUnlocked() end,
+    }
+end
+
+--[[-----------------------------------------------------------------------------
+    Master Config Addon Registration
+-------------------------------------------------------------------------------]]
 function BleakfibersMapsForever:RegisterWithMasterConfig()
     local BAC = _G["BleakfibersAddonConfigForever"] or _G["BleakfibersAddonConfig"]
     if not (BAC and type(BAC.RegisterModule) == "function") then
@@ -63,19 +105,40 @@ function BleakfibersMapsForever:RegisterWithMasterConfig()
 
     local moduleData = {
         id = "BleakfibersMaps",
-        name = "Maps",
-        version = BFM.Version or "1.0.02",
+        name = "Bleakfiber's Maps",
+        sidebarName = "Maps",
+        version = BFM.Version or "1.0.05",
+        author = "Bleakfiber",
+        isBleakfiber = true,
+        description = "Modular square minimap and world map suite featuring custom borders and Fog of War reveal.",
         db = _G["BleakfibersMapsDB"] or BFM.db,
         getDB = function() return _G["BleakfibersMapsDB"] or BFM.db end,
+
+        -- Synchronized Profiles Contract
+        profiles = {
+            GetCurrent = function() return BFM:GetActiveProfile() end,
+            SetCurrent = function(profileKey) BFM:SetActiveProfile(profileKey) end,
+            List       = function() return BFM:GetProfiles() end,
+            Create     = function(profileKey) BFM:CreateProfile(profileKey) end,
+            Delete     = function(profileKey) BFM:DeleteProfile(profileKey) end,
+            Copy       = function(fromKey, toKey) BFM:CopyProfile(fromKey, toKey) end,
+            Reset      = function(profileKey) BFM:ResetProfile(profileKey) end,
+        },
+
+        -- Unified Movers Contract
+        toggleMovers = function(state) return BleakfibersMapsForever:ToggleMovers(state) end,
+        resetMovers  = function() BleakfibersMapsForever:ResetMovers() end,
+        isMoversUnlocked = function() return BleakfibersMapsForever:IsMoversUnlocked() end,
+
         refresh = function()
             BleakfibersMapsForever:ApplySettings()
         end,
         openStandalone = function()
             BFM:ShowConfigUI()
         end,
-        buildUI = function(parentContainer)
+        buildUI = function(parentContainer, isMasterHub)
             if BFM.BuildEmbedUI then
-                BFM:BuildEmbedUI(parentContainer)
+                BFM:BuildEmbedUI(parentContainer, isMasterHub)
             end
         end,
     }
@@ -112,6 +175,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
         if arg1 == addonName then
             BFM:InitDB()
             _G["BleakfibersMapsDB"] = BleakfibersMapsDB
+            RegisterGlobalMovers()
             for _, module in pairs(BFM.modules) do
                 if type(module.OnInitialize) == "function" then
                     module:OnInitialize()
@@ -120,13 +184,16 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             BleakfibersMapsForever:RegisterWithMasterConfig()
             HookBAC()
         elseif arg1 == "BleakfibersAddonConfig-Forever" or arg1 == "BleakfibersAddonConfigForever" then
+            RegisterGlobalMovers()
             BleakfibersMapsForever:RegisterWithMasterConfig()
             HookBAC()
         end
     elseif event == "VARIABLES_LOADED" then
+        RegisterGlobalMovers()
         BleakfibersMapsForever:RegisterWithMasterConfig()
         HookBAC()
     elseif event == "PLAYER_LOGIN" then
+        RegisterGlobalMovers()
         for _, module in pairs(BFM.modules) do
             if type(module.OnEnable) == "function" then
                 module:OnEnable()
@@ -140,6 +207,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1, ...)
             end)
         end
     elseif event == "PLAYER_ENTERING_WORLD" then
+        RegisterGlobalMovers()
         BleakfibersMapsForever:RegisterWithMasterConfig()
         HookBAC()
     end
@@ -157,13 +225,39 @@ SlashCmdList["BLEAKFIBERSMAPS"] = function(msg)
 
     if cmd == "" or cmd == "config" or cmd == "options" or cmd == "menu" then
         BFM:ToggleConfigUI()
-    elseif cmd == "unlock" or cmd == "move" then
-        BFM.db.minimap.unlocked = not BFM.db.minimap.unlocked
-        BFM:NotifySettingsChanged("unlocked")
-        print(string.format("%s Minimap Unlocked (Click & Drag) set to %s", prefix, tostring(BFM.db.minimap.unlocked)))
+    elseif cmd == "unlock" or cmd == "move" or cmd == "movers" then
+        local newState = BleakfibersMapsForever:ToggleMovers()
+        print(string.format("%s Minimap Movers set to %s", prefix, newState and "|cFF00FF00Unlocked|r" or "|cFFFF0000Locked|r"))
     elseif cmd == "resetpos" then
         BleakfibersMapsForever:ResetPosition()
         print(string.format("%s Minimap position reset to default.", prefix))
+    elseif cmd == "reset" then
+        BFM:ResetProfile()
+        print(string.format("%s Current profile ('%s') reset to defaults.", prefix, BFM:GetActiveProfile()))
+    elseif cmd == "profile" then
+        local subCmd, pName = string.match(arg or "", "^(%S+)%s*(.*)$")
+        subCmd = string.lower(subCmd or "")
+        pName = string.trim(pName or "")
+        if subCmd == "list" or subCmd == "" then
+            local list = BFM:GetProfiles()
+            local cur = BFM:GetActiveProfile()
+            print(string.format("%s Profiles: %s (Active: |cFFFFD100%s|r)", prefix, table.concat(list, ", "), cur))
+        elseif (subCmd == "set" or subCmd == "use") and pName ~= "" then
+            BFM:SetActiveProfile(pName)
+            print(string.format("%s Active profile switched to '%s'.", prefix, pName))
+        elseif subCmd == "create" and pName ~= "" then
+            BFM:CreateProfile(pName)
+            print(string.format("%s Profile '%s' created and activated.", prefix, pName))
+        elseif subCmd == "delete" and pName ~= "" then
+            if pName == "Default" then
+                print(string.format("%s Cannot delete the 'Default' profile.", prefix))
+            else
+                BFM:DeleteProfile(pName)
+                print(string.format("%s Profile '%s' deleted.", prefix, pName))
+            end
+        else
+            print(string.format("%s Usage: /bfm profile [list | set <name> | create <name> | delete <name>]", prefix))
+        end
     elseif cmd == "size" then
         local num = tonumber(arg)
         if num and num >= 80 and num <= 512 then
@@ -189,17 +283,22 @@ SlashCmdList["BLEAKFIBERSMAPS"] = function(msg)
         BFM.db.minimap.showCoords = not BFM.db.minimap.showCoords
         BFM:NotifySettingsChanged("showCoords")
         print(string.format("%s Minimap Coordinates set to %s", prefix, tostring(BFM.db.minimap.showCoords)))
+    elseif cmd == "fog" or cmd == "fogofwar" or cmd == "reveal" then
+        BFM.db.worldmap.fogClear = not BFM.db.worldmap.fogClear
+        BFM:NotifySettingsChanged("fogClear")
+        print(string.format("%s World Map Fog of War Reveal set to %s", prefix, tostring(BFM.db.worldmap.fogClear)))
     elseif cmd == "status" then
-        print(string.format("%s v%s Status:", prefix, BFM.Version))
+        print(string.format("%s v%s Status (Profile: |cFFFFD100%s|r):", prefix, BFM.Version, BFM:GetActiveProfile()))
         print(string.format(" - Minimap Size: %d px", BFM.db.minimap.size or 140))
-        print(string.format(" - Unlocked (Draggable): %s", tostring(BFM.db.minimap.unlocked == true)))
+        print(string.format(" - Movers Unlocked: %s", tostring(BFM.db.minimap.unlocked == true)))
         print(string.format(" - Square Quest Indicator: %s", tostring(BFM.db.minimap.questIndicator ~= false)))
         print(string.format(" - Follow Square Perimeter: %s", tostring(BFM.db.minimap.squareIcons ~= false)))
         print(string.format(" - Hide DielFrame: %s", tostring(BFM.db.minimap.hideDielFrame ~= false)))
         print(string.format(" - Minimap Coords: %s", tostring(BFM.db.minimap.showCoords ~= false)))
         print(string.format(" - World Map Coords: %s", tostring(BFM.db.worldmap.showCoords ~= false)))
+        print(string.format(" - World Map Reveal (Fog): %s", tostring(BFM.db.worldmap.fogClear ~= false)))
         print(string.format(" - Border Size: %d px", BFM.db.minimap.borderSize or 1))
     else
-        print(string.format("%s Commands: /bfm (settings GUI), /bfm unlock, /bfm size <num>, /bfm resetpos, /bfm quest, /bfm diel, /bfm icons, /bfm status", prefix))
+        print(string.format("%s Commands: /bfm (settings GUI), /bfm movers, /bfm profile <list|set>, /bfm size <num>, /bfm resetpos, /bfm reset, /bfm fog, /bfm status", prefix))
     end
 end

@@ -3,12 +3,14 @@
 # ==========================================
 /BlizzardInterfaceArt/
 /BlizzardInterfaceCode/
+/reference/
 
 # ==========================================
 # Build Artifacts & Historical Releases
 # ==========================================
 /zips/
 /changelogs/
+*.zip
 
 # ==========================================
 # OS & Editor Metadata
@@ -20,6 +22,7 @@ Thumbs.db
 .vscode/
 .idea/
 
+Build-Release.ps1
 Build-Realease.ps1
 agents.md
-agent.md
+agent.md

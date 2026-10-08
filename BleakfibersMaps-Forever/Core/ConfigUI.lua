@@ -1,6 +1,7 @@
 --[[
     Bleakfiber's Maps - Forever
     Core/ConfigUI.lua - Standalone Master Configuration Window & BAC Embed UI
+    Tabs: General Settings, Minimap Settings, World Map Settings
 ]]
 
 local addonName, BFM = ...
@@ -41,9 +42,20 @@ local COLORS = {
     tabActive    = { 0.22, 0.19, 0.12, 0.95 },
 }
 
-BFM.tabButtons = {}
-BFM.tabContainers = {}
-BFM.currentTab = nil
+-- Preset definitions
+local BORDER_STYLES = {
+    { key = "flat",    label = "Flat (Modern Sleek 1px)" },
+    { key = "tooltip", label = "Blizzard Tooltip" },
+    { key = "dialog",  label = "Blizzard Dialog" },
+    { key = "none",    label = "None (Borderless)" },
+}
+
+local FOG_PRESETS = {
+    { key = "softhaze",   label = "Soft Haze",        r = 0.80, g = 0.90, b = 1.00, a = 0.60 },
+    { key = "parchment",  label = "Parchment Shadow", r = 0.85, g = 0.75, b = 0.55, a = 0.55 },
+    { key = "fullvis",    label = "Full Visibility",  r = 1.00, g = 1.00, b = 1.00, a = 1.00 },
+}
+
 local standaloneFrame
 
 --[[-----------------------------------------------------------------------------
@@ -106,16 +118,17 @@ local function CreateStyledCheckbox(parent, labelText, tooltipText, getFunc, set
 end
 
 --[[-----------------------------------------------------------------------------
-    Helper: Slider
+    Helper: Slider (Non-overlapping value text & proper vertical clearance)
 -------------------------------------------------------------------------------]]
 local function CreateStyledSlider(parent, name, labelText, tooltipText, minVal, maxVal, step, getFunc, setFunc, formatStr)
     local slider = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
-    slider:SetWidth(180)
+    slider:SetWidth(190)
     slider:SetHeight(16)
     slider:SetMinMaxValues(minVal, maxVal)
     slider:SetValueStep(step)
     slider:SetObeyStepOnDrag(true)
 
+    -- Label anchored to TOPLEFT of slider
     local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     label:SetPoint("BOTTOMLEFT", slider, "TOPLEFT", 0, 4)
     label:SetText(labelText)
@@ -126,8 +139,22 @@ local function CreateStyledSlider(parent, name, labelText, tooltipText, minVal, 
     local highText = _G[slider:GetName() .. "High"]
     local valText = _G[slider:GetName() .. "Text"]
 
-    if lowText then lowText:SetText(tostring(minVal)) end
-    if highText then highText:SetText(tostring(maxVal)) end
+    if lowText then
+        lowText:SetText(tostring(minVal))
+        lowText:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
+    end
+    if highText then
+        highText:SetText(tostring(maxVal))
+        highText:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
+    end
+
+    -- Value text anchored to TOPRIGHT of slider to prevent ANY overlap with label
+    if valText then
+        valText:ClearAllPoints()
+        valText:SetPoint("BOTTOMRIGHT", slider, "TOPRIGHT", 0, 4)
+        valText:SetJustifyH("RIGHT")
+        valText:SetTextColor(COLORS.whiteText[1], COLORS.whiteText[2], COLORS.whiteText[3])
+    end
 
     formatStr = formatStr or "%d"
 
@@ -136,7 +163,7 @@ local function CreateStyledSlider(parent, name, labelText, tooltipText, minVal, 
         if valText then
             valText:SetText(string.format(formatStr, steppedValue))
         end
-        if setFunc then
+        if not self.isSyncing and setFunc then
             setFunc(steppedValue)
         end
     end)
@@ -153,10 +180,12 @@ local function CreateStyledSlider(parent, name, labelText, tooltipText, minVal, 
         end)
     end
 
-    slider.Sync = function()
+    slider.Sync = function(self)
         if getFunc then
             local cur = getFunc() or minVal
-            slider:SetValue(cur)
+            self.isSyncing = true
+            self:SetValue(cur)
+            self.isSyncing = false
             if valText then
                 valText:SetText(string.format(formatStr, cur))
             end
@@ -258,25 +287,236 @@ local function OpenColorPicker(initialColor, onColorChanged)
 end
 
 --[[-----------------------------------------------------------------------------
-    Tab 1: Minimap Settings
+    Helper: Cycle Button
 -------------------------------------------------------------------------------]]
-function BFM:BuildMinimapTab(parent)
-    local scrollFrame = CreateFrame("ScrollFrame", "BFM_MinimapTabScroll", parent, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+local function CreateStyledCycleButton(parent, labelPrefix, width, height, optionsList, getFunc, setFunc, tooltipText)
+    local btn = CreateStyledButton(parent, "", width or 190, height or 22, nil, tooltipText)
 
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(490, 480)
-    scrollFrame:SetScrollChild(content)
+    local function GetCurrentIndex()
+        local cur = getFunc and getFunc()
+        for i, opt in ipairs(optionsList) do
+            if opt.key == cur then return i end
+        end
+        return 1
+    end
 
-    local syncList = {}
+    local function UpdateLabel()
+        local idx = GetCurrentIndex()
+        local opt = optionsList[idx]
+        btn.Text:SetText(string.format("%s: |cFFFFD100%s|r", labelPrefix, opt and opt.label or "Default"))
+    end
+
+    btn:SetScript("OnClick", function(self)
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        local idx = GetCurrentIndex()
+        local nextIdx = (idx % #optionsList) + 1
+        local nextOpt = optionsList[nextIdx]
+        if setFunc and nextOpt then
+            setFunc(nextOpt.key, nextOpt)
+        end
+        UpdateLabel()
+    end)
+
+    btn.Sync = UpdateLabel
+    UpdateLabel()
+    return btn
+end
+
+--[[-----------------------------------------------------------------------------
+    Helper: Tab Button (Matching Quest Tracker / BAC sub-tab styling)
+-------------------------------------------------------------------------------]]
+local function CreateStyledTabButton(parent, id, text, width, height, onClick)
+    local btn = CreateFrame("Button", nil, parent, BACKDROP_TEMPLATE)
+    btn:SetSize(width or 130, height or 24)
+    btn:SetBackdrop(INSET_BACKDROP)
+    btn:SetBackdropColor(unpack(COLORS.tabNormal))
+    btn:SetBackdropBorderColor(unpack(COLORS.goldMuted))
+
+    local title = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    title:SetPoint("CENTER", btn, "CENTER", 0, 0)
+    title:SetText(text)
+    btn.title = title
+
+    local indicator = btn:CreateTexture(nil, "OVERLAY")
+    indicator:SetHeight(2)
+    indicator:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 4, 1)
+    indicator:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -4, 1)
+    indicator:SetColorTexture(COLORS.goldBorder[1], COLORS.goldBorder[2], COLORS.goldBorder[3], 1.0)
+    indicator:Hide()
+    btn.indicator = indicator
+
+    btn:SetScript("OnEnter", function(self)
+        if not self.isActive then
+            self:SetBackdropColor(unpack(COLORS.tabHighlight))
+            self:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+        end
+    end)
+
+    btn:SetScript("OnLeave", function(self)
+        if not self.isActive then
+            self:SetBackdropColor(unpack(COLORS.tabNormal))
+            self:SetBackdropBorderColor(unpack(COLORS.goldMuted))
+        end
+    end)
+
+    btn:SetScript("OnClick", function(self)
+        PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+        if onClick then onClick(id) end
+    end)
+
+    btn.SetActive = function(self, active)
+        self.isActive = active
+        if active then
+            self:SetBackdropColor(unpack(COLORS.tabActive))
+            self:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+            self.title:SetTextColor(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3])
+            self.indicator:Show()
+        else
+            self:SetBackdropColor(unpack(COLORS.tabNormal))
+            self:SetBackdropBorderColor(unpack(COLORS.goldMuted))
+            self.title:SetTextColor(COLORS.whiteText[1], COLORS.whiteText[2], COLORS.whiteText[3])
+            self.indicator:Hide()
+        end
+    end
+
+    return btn
+end
+
+--[[-----------------------------------------------------------------------------
+    TAB 1 BUILDER: General Settings
+-------------------------------------------------------------------------------]]
+function BFM:BuildGeneralTab(content, syncList, isEmbed)
+    local pfx = isEmbed and "BFM_BAC_" or "BFM_Standalone_"
+    local yOfs = -10
+
+    -- Section 1: Addon Info & Master Config Status
+    CreateSectionHeader(content, "INTEGRATION & STATUS", 12, yOfs)
+    yOfs = yOfs - 32
+
+    local titleLine = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    titleLine:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    titleLine:SetText("|cFFFFD100Bleakfiber's Maps|r  -  |cFF8899A6World of Warcraft Forever|r")
+    yOfs = yOfs - 22
+
+    local infoLine = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    infoLine:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    infoLine:SetText(string.format("|cFFFFD100Version:|r %s    |cFFFFD100Interface:|r 16001    |cFFFFD100Author:|r Bleakfiber", BFM.Version or "1.0.05"))
+    yOfs = yOfs - 22
+
+    local bacLoaded = _G["BleakfibersAddonConfigForever"] ~= nil or _G["BleakfibersAddonConfig"] ~= nil
+    local statusLine = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    statusLine:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    statusLine:SetText(string.format("|cFFFFD100Master Config Hub:|r %s", bacLoaded and "|cFF00FF00Connected (/bac)|r" or "|cFF8899A6Standalone Mode|r"))
+    yOfs = yOfs - 26
+
+    local desc = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    desc:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    desc:SetWidth(450)
+    desc:SetJustifyH("LEFT")
+    desc:SetText("A modular square minimap and world map suite featuring custom borders, button scaling, throttled coordinates HUD, and full World Map Fog of War reveal.")
+    desc:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
+    yOfs = yOfs - 45
+
+    -- Section 2: Profile Management
+    CreateSectionHeader(content, "PROFILE MANAGEMENT", 12, yOfs)
+    yOfs = yOfs - 32
+
+    local profileLabel = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    profileLabel:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    profileLabel:SetText(string.format("Active Profile: |cFFFFD100%s|r", BFM:GetActiveProfile()))
+    if syncList then
+        table.insert(syncList, {
+            Sync = function()
+                profileLabel:SetText(string.format("Active Profile: |cFFFFD100%s|r", BFM:GetActiveProfile()))
+            end
+        })
+    end
+    yOfs = yOfs - 24
+
+    local cycleProfileBtn = CreateStyledButton(content, "Switch Profile", 130, 22, function()
+        local list = BFM:GetProfiles()
+        local cur = BFM:GetActiveProfile()
+        local nextIndex = 1
+        for i, name in ipairs(list) do
+            if name == cur then
+                nextIndex = (i % #list) + 1
+                break
+            end
+        end
+        local newProfile = list[nextIndex] or "Default"
+        BFM:SetActiveProfile(newProfile)
+        profileLabel:SetText(string.format("Active Profile: |cFFFFD100%s|r", newProfile))
+        if content.SyncAll then content.SyncAll() end
+        print(string.format("|cFFFFD100Bleakfiber's Maps|r: Switched to profile '|cFFFFD100%s|r'.", newProfile))
+    end, "Cycles through available saved profiles.")
+    cycleProfileBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+
+    local resetProfileBtn = CreateStyledButton(content, "Reset Current Profile", 150, 22, function()
+        local cur = BFM:GetActiveProfile()
+        BFM:ResetProfile(cur)
+        if content.SyncAll then content.SyncAll() end
+        print(string.format("|cFFFFD100Bleakfiber's Maps|r: Profile '|cFFFFD100%s|r' reset to defaults.", cur))
+    end, "Resets current profile settings back to defaults without affecting other profiles.")
+    resetProfileBtn:SetPoint("LEFT", cycleProfileBtn, "RIGHT", 10, 0)
+    yOfs = yOfs - 36
+
+    -- Section 3: Slash Commands Reference
+    CreateSectionHeader(content, "SLASH COMMANDS & SHORTCUTS", 12, yOfs)
+    yOfs = yOfs - 32
+
+    local commands = {
+        { cmd = "/bfm",              desc = "Toggle settings window" },
+        { cmd = "/bfm movers",       desc = "Toggle click-to-drag minimap movement overlay" },
+        { cmd = "/bfm profile <cmd>",desc = "Profile manager (list, set <name>, create, delete)" },
+        { cmd = "/bfm size <num>",   desc = "Adjust minimap pixel size (100 - 512)" },
+        { cmd = "/bfm resetpos",     desc = "Restore default top-right minimap anchor" },
+        { cmd = "/bfm reset",        desc = "Reset current active profile to defaults" },
+        { cmd = "/bfm fog",          desc = "Toggle World Map Fog of War reveal" },
+        { cmd = "/bfm quest",        desc = "Toggle square quest zone indicator" },
+        { cmd = "/bfm diel",         desc = "Toggle sun/moon day-night dial (DielFrame)" },
+        { cmd = "/bfm icons",        desc = "Toggle square minimap icon perimeter" },
+        { cmd = "/bfm coords",       desc = "Toggle minimap coordinate & subzone bar" },
+        { cmd = "/bfm status",       desc = "Print current active settings to chat" },
+    }
+
+    for _, entry in ipairs(commands) do
+        local line = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        line:SetPoint("TOPLEFT", content, "TOPLEFT", 20, yOfs)
+        line:SetText(string.format("|cFFFFD100%s|r  -  %s", entry.cmd, entry.desc))
+        yOfs = yOfs - 20
+    end
+
+    yOfs = yOfs - 20
+
+    -- Section 4: Defaults & Reset
+    CreateSectionHeader(content, "FACTORY DEFAULTS", 12, yOfs)
+    yOfs = yOfs - 32
+
+    local resetAllBtn = CreateStyledButton(content, "Reset All Settings", 150, 24, function()
+        wipe(BleakfibersMapsDB)
+        BFM:InitDB()
+        BFM:ApplySettings()
+        if content.SyncAll then content.SyncAll() end
+        print("|cFFFFD100Bleakfiber's Maps|r: All settings restored to factory defaults.")
+    end, "Resets all minimap and world map settings back to default values.")
+    resetAllBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+
+    yOfs = yOfs - 40
+    content:SetHeight(math.abs(yOfs))
+end
+
+--[[-----------------------------------------------------------------------------
+    TAB 2 BUILDER: Minimap Settings
+-------------------------------------------------------------------------------]]
+function BFM:BuildMinimapTab(content, syncList, isEmbed)
+    local pfx = isEmbed and "BFM_BAC_" or "BFM_Standalone_"
     local yOfs = -10
 
     -- Section 1: Sizing & Geometry
     CreateSectionHeader(content, "SIZING & GEOMETRY", 12, yOfs)
-    yOfs = yOfs - 36
+    yOfs = yOfs - 34
 
-    local sizeSlider = CreateStyledSlider(content, "BFM_Slider_MinimapSize", "Minimap Size (Pixels):",
+    local sizeSlider = CreateStyledSlider(content, pfx .. "MinimapSize", "Minimap Size (Pixels):",
         "Adjusts the dimensions of the square minimap in pixels (100 - 512px). Automatically re-projects map tiles instantly.",
         100, 512, 5,
         function() return BFM.db.minimap.size or 140 end,
@@ -288,8 +528,8 @@ function BFM:BuildMinimapTab(parent)
     sizeSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
     table.insert(syncList, sizeSlider)
 
-    local borderSlider = CreateStyledSlider(content, "BFM_Slider_BorderSize", "Border Thickness:",
-        "Controls the pixel thickness of the square minimap border.",
+    local borderSlider = CreateStyledSlider(content, pfx .. "BorderSize", "Border Thickness:",
+        "Controls the pixel thickness of the square minimap border (1 - 5px, applied to Flat style).",
         1, 5, 1,
         function() return BFM.db.minimap.borderSize or 1 end,
         function(val)
@@ -297,24 +537,107 @@ function BFM:BuildMinimapTab(parent)
             BFM:ApplySettings()
         end
     )
-    borderSlider:SetPoint("LEFT", sizeSlider, "RIGHT", 40, 0)
+    borderSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 240, yOfs)
     table.insert(syncList, borderSlider)
 
-    yOfs = yOfs - 50
+    yOfs = yOfs - 55
 
-    -- Border Color Swatch Button
-    local colorBtn = CreateStyledButton(content, "Border Color", 120, 22, function()
+    -- Section 2: Appearance & Border
+    CreateSectionHeader(content, "APPEARANCE & BORDER", 12, yOfs)
+    yOfs = yOfs - 34
+
+    local borderStyleBtn = CreateStyledCycleButton(content, "Border", 200, 22, BORDER_STYLES,
+        function() return BFM.db.minimap.borderStyle or "flat" end,
+        function(val)
+            BFM.db.minimap.borderStyle = val
+            BFM:ApplySettings()
+        end,
+        "Cycle between available border styles:\n• Flat: Sleek pixel-perfect border\n• Blizzard Tooltip: Rounded tooltip corners\n• Blizzard Dialog: Classic window border\n• None: Clean borderless edge"
+    )
+    borderStyleBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, borderStyleBtn)
+
+    local cbClassColor = CreateStyledCheckbox(content, "Class-Colored Border",
+        "Automatically tint the minimap border using your character's class color.",
+        function() return BFM.db.minimap.classColorBorder == true end,
+        function(checked)
+            BFM.db.minimap.classColorBorder = checked
+            BFM:ApplySettings()
+        end
+    )
+    cbClassColor:SetPoint("TOPLEFT", content, "TOPLEFT", 240, yOfs + 2)
+    table.insert(syncList, cbClassColor)
+
+    yOfs = yOfs - 38
+
+    local borderColorBtn = CreateStyledButton(content, "Border Color", 120, 22, function()
         local cur = BFM.db.minimap.borderColor or { r = 0, g = 0, b = 0, a = 1 }
         OpenColorPicker(cur, function(r, g, b, a)
             BFM.db.minimap.borderColor = { r = r, g = g, b = b, a = a }
             BFM:ApplySettings()
         end)
-    end, "Choose a custom color and opacity for the square minimap border.")
-    colorBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    end, "Choose a custom color and opacity for the minimap border (used when Class-Colored Border is disabled).")
+    borderColorBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
 
-    yOfs = yOfs - 40
+    local backdropColorBtn = CreateStyledButton(content, "Backdrop Color", 130, 22, function()
+        local cur = BFM.db.minimap.backdropColor or { r = 0, g = 0, b = 0, a = 0.8 }
+        OpenColorPicker(cur, function(r, g, b, a)
+            BFM.db.minimap.backdropColor = { r = r, g = g, b = b, a = a }
+            BFM:ApplySettings()
+        end)
+    end, "Choose a custom color and opacity for the minimap background canvas fill.")
+    backdropColorBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 150, yOfs)
 
-    -- Section 2: Movement & Positioning
+    yOfs = yOfs - 45
+
+    -- Section 3: Button Scaling
+    CreateSectionHeader(content, "BUTTON SCALING", 12, yOfs)
+    yOfs = yOfs - 34
+
+    local trackerScaleSlider = CreateStyledSlider(content, pfx .. "TrackerScale", "Tracking Button Scale:",
+        "Adjusts the scale of the Minimap Tracking icon (50% - 150%).",
+        50, 150, 5,
+        function() return math.floor(((BFM.db.minimap.trackerScale or 0.85) * 100) + 0.5) end,
+        function(val)
+            BFM.db.minimap.trackerScale = val / 100
+            BFM:ApplySettings()
+        end,
+        "%d%%"
+    )
+    trackerScaleSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, trackerScaleSlider)
+
+    local calendarScaleSlider = CreateStyledSlider(content, pfx .. "CalendarScale", "Calendar Button Scale:",
+        "Adjusts the scale of the Game Time / Calendar icon (50% - 150%).",
+        50, 150, 5,
+        function() return math.floor(((BFM.db.minimap.calendarScale or 0.80) * 100) + 0.5) end,
+        function(val)
+            BFM.db.minimap.calendarScale = val / 100
+            BFM:ApplySettings()
+        end,
+        "%d%%"
+    )
+    calendarScaleSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 240, yOfs)
+    table.insert(syncList, calendarScaleSlider)
+
+    yOfs = yOfs - 55
+
+    local timeScaleSlider = CreateStyledSlider(content, pfx .. "TimeScale", "Clock Button Scale:",
+        "Adjusts the scale of the docked Time Manager Clock (50% - 150%).",
+        50, 150, 5,
+        function() return math.floor(((BFM.db.minimap.timeScale or 0.85) * 100) + 0.5) end,
+        function(val)
+            BFM.db.minimap.timeScale = val / 100
+            BFM:ApplySettings()
+        end,
+        "%d%%"
+    )
+    timeScaleSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, timeScaleSlider)
+
+    yOfs = yOfs - 55
+
+    -- Section 4: Movement & Positioning
     CreateSectionHeader(content, "MOVEMENT & POSITIONING", 12, yOfs)
     yOfs = yOfs - 34
 
@@ -333,11 +656,11 @@ function BFM:BuildMinimapTab(parent)
         BleakfibersMapsForever:ResetPosition()
         print("|cFFFFD100Bleakfiber's Maps|r: Minimap position reset to default.")
     end, "Restores the minimap to its default top-right anchor position.")
-    resetBtn:SetPoint("LEFT", cbUnlock.Text, "RIGHT", 30, 0)
+    resetBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 280, yOfs - 1)
 
-    yOfs = yOfs - 40
+    yOfs = yOfs - 42
 
-    -- Section 3: Features & Clutter
+    -- Section 5: Features & Clutter
     CreateSectionHeader(content, "FEATURES & CLUTTER", 12, yOfs)
     yOfs = yOfs - 34
 
@@ -391,35 +714,10 @@ function BFM:BuildMinimapTab(parent)
     cbZoom:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
     table.insert(syncList, cbZoom)
 
-    yOfs = yOfs - 35
-    content:SetHeight(math.abs(yOfs))
+    yOfs = yOfs - 42
 
-    parent.Sync = function()
-        for _, widget in ipairs(syncList) do
-            if widget.Sync then widget:Sync() end
-        end
-    end
-
-    return parent
-end
-
---[[-----------------------------------------------------------------------------
-    Tab 2: Coordinates & Overlays
--------------------------------------------------------------------------------]]
-function BFM:BuildCoordinatesTab(parent)
-    local scrollFrame = CreateFrame("ScrollFrame", "BFM_CoordsTabScroll", parent, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(490, 360)
-    scrollFrame:SetScrollChild(content)
-
-    local syncList = {}
-    local yOfs = -10
-
-    -- Section 1: Minimap Coordinates HUD
-    CreateSectionHeader(content, "MINIMAP COORDINATES HUD", 12, yOfs)
+    -- Section 6: Minimap Coordinates & HUD
+    CreateSectionHeader(content, "MINIMAP COORDINATES & HUD", 12, yOfs)
     yOfs = yOfs - 34
 
     local cbMinimapCoords = CreateStyledCheckbox(content, "Show Minimap Coordinates & Subzone Bar",
@@ -435,13 +733,22 @@ function BFM:BuildCoordinatesTab(parent)
 
     local note1 = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     note1:SetPoint("TOPLEFT", cbMinimapCoords, "BOTTOMLEFT", 26, -4)
-    note1:SetText("Updates at a throttled 0.1s tick rate. Left-click to toggle World Map.")
+    note1:SetText("Updates at throttled 0.1s rate. Automatically hidden if Quest Tracker Location Bar is active.")
     note1:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
 
-    yOfs = yOfs - 50
+    yOfs = yOfs - 48
+    content:SetHeight(math.abs(yOfs))
+end
 
-    -- Section 2: World Map Overlay
-    CreateSectionHeader(content, "WORLD MAP CANVAS OVERLAY", 12, yOfs)
+--[[-----------------------------------------------------------------------------
+    TAB 3 BUILDER: World Map Settings
+-------------------------------------------------------------------------------]]
+function BFM:BuildWorldMapTab(content, syncList, isEmbed)
+    local pfx = isEmbed and "BFM_BAC_" or "BFM_Standalone_"
+    local yOfs = -10
+
+    -- Section 1: Coordinates Overlay
+    CreateSectionHeader(content, "WORLD MAP CANVAS OVERLAYS", 12, yOfs)
     yOfs = yOfs - 34
 
     local cbWorldCoords = CreateStyledCheckbox(content, "Show World Map Coordinate Overlay",
@@ -461,95 +768,99 @@ function BFM:BuildCoordinatesTab(parent)
     note2:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
 
     yOfs = yOfs - 50
-    content:SetHeight(math.abs(yOfs))
 
-    parent.Sync = function()
-        for _, widget in ipairs(syncList) do
-            if widget.Sync then widget:Sync() end
-        end
-    end
-
-    return parent
-end
-
---[[-----------------------------------------------------------------------------
-    Tab 3: About & Commands
--------------------------------------------------------------------------------]]
-function BFM:BuildAboutTab(parent)
-    local scrollFrame = CreateFrame("ScrollFrame", "BFM_AboutTabScroll", parent, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(490, 420)
-    scrollFrame:SetScrollChild(content)
-
-    local yOfs = -10
-
-    -- Section 1: Addon Info
-    CreateSectionHeader(content, "ABOUT BLEAKFIBER'S MAPS", 12, yOfs)
+    -- Section 2: Fog of War / Map Reveal
+    CreateSectionHeader(content, "FOG OF WAR / MAP REVEAL", 12, yOfs)
     yOfs = yOfs - 34
 
-    local desc = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    desc:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    desc:SetWidth(460)
-    desc:SetJustifyH("LEFT")
-    desc:SetText("Bleakfiber's Maps is a lightweight, modular square minimap and coordinates suite built specifically for World of Warcraft Forever (Interface 16001).")
-    desc:SetTextColor(COLORS.whiteText[1], COLORS.whiteText[2], COLORS.whiteText[3])
+    local cbFog = CreateStyledCheckbox(content, "Reveal Unexplored Map Areas (Fog of War)",
+        "Removes parchment fog from unvisited zones, rendering full terrain artwork with customizable tint and opacity.",
+        function() return BFM.db.worldmap.fogClear ~= false end,
+        function(checked)
+            BFM.db.worldmap.fogClear = checked
+            BFM:ApplySettings()
+        end
+    )
+    cbFog:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, cbFog)
+
+    yOfs = yOfs - 38
+
+    local fogAlphaSlider = CreateStyledSlider(content, pfx .. "FogAlpha", "Unexplored Overlay Opacity:",
+        "Controls the transparency of revealed unexplored terrain overlays (10% - 100%).",
+        10, 100, 5,
+        function() return math.floor(((BFM.db.worldmap.fogAlpha or 0.60) * 100) + 0.5) end,
+        function(val)
+            BFM.db.worldmap.fogAlpha = val / 100
+            BFM:ApplySettings()
+        end,
+        "%d%%"
+    )
+    fogAlphaSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, fogAlphaSlider)
+
+    yOfs = yOfs - 55
+
+    local fogColorBtn = CreateStyledButton(content, "Overlay Tint Color", 150, 22, function()
+        local cur = BFM.db.worldmap.fogColor or { r = 0.90, g = 0.90, b = 1.00 }
+        OpenColorPicker({ r = cur.r, g = cur.g, b = cur.b, a = BFM.db.worldmap.fogAlpha or 0.60 }, function(r, g, b, a)
+            BFM.db.worldmap.fogColor = { r = r, g = g, b = b }
+            BFM.db.worldmap.fogAlpha = a
+            BFM:ApplySettings()
+            if fogAlphaSlider and fogAlphaSlider.Sync then fogAlphaSlider:Sync() end
+        end)
+    end, "Choose a custom color tint and opacity for unvisited map overlays.")
+    fogColorBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+
+    local presetBtn = CreateStyledCycleButton(content, "Preset", 190, 22, FOG_PRESETS,
+        function()
+            local curC = BFM.db.worldmap.fogColor or {}
+            local curA = BFM.db.worldmap.fogAlpha or 0.60
+            for _, p in ipairs(FOG_PRESETS) do
+                if math.abs((curC.r or 1) - p.r) < 0.05
+                   and math.abs((curC.g or 1) - p.g) < 0.05
+                   and math.abs((curC.b or 1) - p.b) < 0.05
+                   and math.abs(curA - p.a) < 0.05 then
+                    return p.key
+                end
+            end
+            return FOG_PRESETS[1].key
+        end,
+        function(key, opt)
+            if opt then
+                BFM.db.worldmap.fogColor = { r = opt.r, g = opt.g, b = opt.b }
+                BFM.db.worldmap.fogAlpha = opt.a
+                BFM:ApplySettings()
+                if fogAlphaSlider and fogAlphaSlider.Sync then fogAlphaSlider:Sync() end
+            end
+        end,
+        "Cycle through curated visual presets for unexplored territory."
+    )
+    presetBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 180, yOfs)
+    table.insert(syncList, presetBtn)
+
+    yOfs = yOfs - 38
+
+    local note3 = content:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    note3:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    note3:SetWidth(450)
+    note3:SetJustifyH("LEFT")
+    note3:SetText("Discovered zones always render at full 100% natural color. Unexplored zones display using your chosen tint and opacity.")
+    note3:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
 
     yOfs = yOfs - 45
-
-    local authorInfo = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    authorInfo:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    authorInfo:SetText(string.format("|cFFFFD100Author:|r Bleakfiber    |cFFFFD100Version:|r %s    |cFFFFD100Interface:|r 16001", BFM.Version or "1.0.02"))
-
-    yOfs = yOfs - 22
-
-    local masterStatus = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    masterStatus:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    local bacLoaded = _G["BleakfibersAddonConfigForever"] ~= nil
-    masterStatus:SetText(string.format("|cFFFFD100Master Config Hub:|r %s", bacLoaded and "|cFF00FF00Connected (/bac)|r" or "|cFF8899A6Standalone Mode|r"))
-
-    yOfs = yOfs - 35
-
-    -- Section 2: Slash Commands
-    CreateSectionHeader(content, "SLASH COMMANDS", 12, yOfs)
-    yOfs = yOfs - 34
-
-    local commands = {
-        { cmd = "/bfm", desc = "Open this configuration window" },
-        { cmd = "/bfm unlock", desc = "Toggle click-to-drag minimap movement" },
-        { cmd = "/bfm size <100-512>", desc = "Adjust minimap pixel size" },
-        { cmd = "/bfm resetpos", desc = "Restore default top-right minimap position" },
-        { cmd = "/bfm quest", desc = "Toggle square quest zone indicator" },
-        { cmd = "/bfm diel", desc = "Toggle day/night cycle dial (DielFrame)" },
-        { cmd = "/bfm icons", desc = "Toggle square minimap icon perimeter" },
-        { cmd = "/bfm coords", desc = "Toggle minimap coordinate & subzone bar" },
-        { cmd = "/bfm status", desc = "Print current active settings to chat" },
-    }
-
-    for _, entry in ipairs(commands) do
-        local line = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        line:SetPoint("TOPLEFT", content, "TOPLEFT", 20, yOfs)
-        line:SetText(string.format("|cFFFFD100%s|r  -  %s", entry.cmd, entry.desc))
-        yOfs = yOfs - 18
-    end
-
-    yOfs = yOfs - 10
     content:SetHeight(math.abs(yOfs))
-
-    return parent
 end
 
 --[[-----------------------------------------------------------------------------
-    Standalone Master Frame Initialization
+    Standalone Master Frame Initialization (With Horizontal Tabs matching Quest Tracker)
 -------------------------------------------------------------------------------]]
 function BFM:CreateStandaloneConfigFrame()
     if standaloneFrame then return standaloneFrame end
 
     local db = (BFM.db and BFM.db.configWindow) or {}
-    local width = db.width or 760
-    local height = db.height or 520
+    local width = db.width or 680
+    local height = db.height or 540
     local point = db.point or "CENTER"
     local relPoint = db.relativePoint or "CENTER"
     local xOfs = db.xOfs or 0
@@ -568,10 +879,10 @@ function BFM:CreateStandaloneConfigFrame()
     tinsert(UISpecialFrames, "BleakfibersMapsConfigFrame")
 
     if f.SetResizeBounds then
-        f:SetResizeBounds(640, 420, 1200, 850)
+        f:SetResizeBounds(580, 420, 1100, 850)
     else
-        f:SetMinResize(640, 420)
-        f:SetMaxResize(1200, 850)
+        f:SetMinResize(580, 420)
+        f:SetMaxResize(1100, 850)
     end
 
     f:SetBackdrop(MAIN_WINDOW_BACKDROP)
@@ -602,7 +913,7 @@ function BFM:CreateStandaloneConfigFrame()
         end
     end)
 
-    -- Title Icon / Emblem
+    -- Title Icon
     local titleIcon = titleBar:CreateTexture(nil, "ARTWORK")
     titleIcon:SetSize(18, 18)
     titleIcon:SetPoint("LEFT", titleBar, "LEFT", 6, 0)
@@ -617,7 +928,23 @@ function BFM:CreateStandaloneConfigFrame()
     -- Version Subtitle
     local versionText = titleBar:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     versionText:SetPoint("LEFT", titleText, "RIGHT", 8, -1)
-    versionText:SetText("v" .. (BFM.Version or "1.0.02"))
+    versionText:SetText("v" .. (BFM.Version or "1.0.05"))
+
+    -- Refresh Button in Title Bar
+    local refreshBtn = CreateStyledButton(titleBar, "Refresh", 70, 20, function()
+        BleakfibersMapsForever:ApplySettings()
+        if f.SyncAll then f:SyncAll() end
+        print("|cFFFFD100Bleakfiber's Maps|r: Settings refreshed.")
+    end, "Reapplies all visual settings and refreshes map projections.")
+    refreshBtn:SetPoint("RIGHT", titleBar, "RIGHT", -6, 0)
+
+    -- Toggle Movers Button in Title Bar (Standardized standalone mover button)
+    local btnMovers = CreateStyledButton(titleBar, "Toggle Movers", 100, 20, function()
+        local newState = BleakfibersMapsForever:ToggleMovers()
+        print(string.format("|cFFFFD100Bleakfiber's Maps|r: Minimap Movers %s.", newState and "|cFF00FF00Unlocked|r" or "|cFFFF0000Locked|r"))
+    end, "Toggles minimap anchor mover overlay for click-and-drag repositioning.")
+    btnMovers:SetPoint("RIGHT", refreshBtn, "LEFT", -6, 0)
+    f.btnMovers = btnMovers
 
     -- Gold Divider below Title Bar
     local titleDivider = f:CreateTexture(nil, "ARTWORK")
@@ -669,146 +996,99 @@ function BFM:CreateStandaloneConfigFrame()
     footerText:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 8)
     footerText:SetText("|cFF667788Use /bfm or /bleakfibersmaps to toggle this window|r")
 
-    -- Left Sidebar Frame
-    local sidebar = CreateFrame("Frame", nil, f, BACKDROP_TEMPLATE)
-    sidebar:SetWidth(190)
-    sidebar:SetPoint("TOPLEFT", f, "TOPLEFT", 10, -44)
-    sidebar:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 10, 24)
-    sidebar:SetBackdrop(INSET_BACKDROP)
-    sidebar:SetBackdropColor(unpack(COLORS.sidebarBg))
-    sidebar:SetBackdropBorderColor(unpack(COLORS.goldMuted))
-    f.sidebar = sidebar
+    -- Horizontal Tab Bar (Top row, matching Quest Tracker in BAC)
+    local tabBar = CreateFrame("Frame", nil, f)
+    tabBar:SetHeight(28)
+    tabBar:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -42)
+    tabBar:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -42)
 
-    -- Sidebar Header
-    CreateSectionHeader(sidebar, "CATEGORIES", 12, -10)
+    -- Inset Content Box below Tabs
+    local insetBox = CreateFrame("Frame", nil, f, BACKDROP_TEMPLATE)
+    insetBox:SetPoint("TOPLEFT", tabBar, "BOTTOMLEFT", 0, -4)
+    insetBox:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -12, 26)
+    insetBox:SetBackdrop(INSET_BACKDROP)
+    insetBox:SetBackdropColor(unpack(COLORS.contentBg))
+    insetBox:SetBackdropBorderColor(unpack(COLORS.goldMuted))
 
-    -- Sidebar Scrollable Frame
-    local sidebarScroll = CreateFrame("ScrollFrame", "BFM_SidebarScrollFrame", sidebar, "UIPanelScrollFrameTemplate")
-    sidebarScroll:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 6, -30)
-    sidebarScroll:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", -26, 8)
-
-    local scrollChild = CreateFrame("Frame", nil, sidebarScroll)
-    scrollChild:SetSize(155, 1)
-    sidebarScroll:SetScrollChild(scrollChild)
-    f.sidebarScrollChild = scrollChild
-
-    -- Right Content Pane
-    local contentPane = CreateFrame("Frame", nil, f, BACKDROP_TEMPLATE)
-    contentPane:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 8, 0)
-    contentPane:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 24)
-    contentPane:SetBackdrop(INSET_BACKDROP)
-    contentPane:SetBackdropColor(unpack(COLORS.contentBg))
-    contentPane:SetBackdropBorderColor(unpack(COLORS.goldMuted))
-    f.contentPane = contentPane
-
-    -- Content Header Bar
-    local contentHeader = CreateFrame("Frame", nil, contentPane)
-    contentHeader:SetHeight(32)
-    contentHeader:SetPoint("TOPLEFT", contentPane, "TOPLEFT", 12, -6)
-    contentHeader:SetPoint("TOPRIGHT", contentPane, "TOPRIGHT", -12, -6)
-    f.contentHeader = contentHeader
-
-    local contentTitle = contentHeader:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    contentTitle:SetPoint("LEFT", contentHeader, "LEFT", 0, 0)
-    contentTitle:SetText("")
-    contentTitle:SetTextColor(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3])
-    f.contentTitle = contentTitle
-
-    -- Refresh Button in Content Header
-    local refreshBtn = CreateStyledButton(contentHeader, "Refresh", 75, 22, function()
-        BleakfibersMapsForever:ApplySettings()
-        if f.contentArea and BFM.currentTab and BFM.tabContainers[BFM.currentTab] then
-            local active = BFM.tabContainers[BFM.currentTab]
-            if active.Sync then active:Sync() end
-        end
-        print("|cFFFFD100Bleakfiber's Maps|r: Settings refreshed.")
-    end, "Reapplies all visual settings and refreshes map projections.")
-    refreshBtn:SetPoint("RIGHT", contentHeader, "RIGHT", 0, 0)
-    f.refreshBtn = refreshBtn
-
-    -- Content Header Divider
-    local contentDivider = contentPane:CreateTexture(nil, "ARTWORK")
-    contentDivider:SetHeight(1)
-    contentDivider:SetPoint("TOPLEFT", contentPane, "TOPLEFT", 10, -38)
-    contentDivider:SetPoint("TOPRIGHT", contentPane, "TOPRIGHT", -10, -38)
-    contentDivider:SetColorTexture(COLORS.goldMuted[1], COLORS.goldMuted[2], COLORS.goldMuted[3], 0.5)
-    f.contentDivider = contentDivider
-
-    -- Content Container Area
-    local contentArea = CreateFrame("Frame", nil, contentPane)
-    contentArea:SetPoint("TOPLEFT", contentPane, "TOPLEFT", 10, -42)
-    contentArea:SetPoint("BOTTOMRIGHT", contentPane, "BOTTOMRIGHT", -10, 10)
-    f.contentArea = contentArea
-
-    -- Build Category Tabs
-    local tabs = {
-        { id = "minimap", name = "Minimap Settings", builder = BFM.BuildMinimapTab },
-        { id = "coordinates", name = "Coordinates & HUD", builder = BFM.BuildCoordinatesTab },
-        { id = "about", name = "About & Commands", builder = BFM.BuildAboutTab },
+    local tabDefs = {
+        { id = "general",  label = "General Settings",   width = 140, builder = BFM.BuildGeneralTab },
+        { id = "minimap",  label = "Minimap Settings",   width = 140, builder = BFM.BuildMinimapTab },
+        { id = "worldmap", label = "World Map Settings", width = 150, builder = BFM.BuildWorldMapTab },
     }
 
-    local tabHeight = 32
-    local tabSpacing = 4
-    local currentY = 0
+    local tabBtns = {}
+    local tabScrolls = {}
+    local syncLists = {}
 
-    for _, tabData in ipairs(tabs) do
-        local tabID = tabData.id
+    local function SelectTab(tabID)
+        if BFM.db and BFM.db.configWindow then
+            BFM.db.configWindow.lastTab = tabID
+        end
 
-        -- Create Tab Button in Sidebar
-        local btn = CreateFrame("Button", nil, scrollChild, BACKDROP_TEMPLATE)
-        btn:SetHeight(tabHeight)
-        btn:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, -currentY)
-        btn:SetPoint("TOPRIGHT", scrollChild, "TOPRIGHT", 0, -currentY)
-        btn:SetBackdrop(INSET_BACKDROP)
+        for id, btn in pairs(tabBtns) do
+            btn:SetActive(id == tabID)
+        end
 
-        btn.title = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        btn.title:SetPoint("LEFT", btn, "LEFT", 10, 0)
-        btn.title:SetPoint("RIGHT", btn, "RIGHT", -10, 0)
-        btn.title:SetJustifyH("LEFT")
-        btn.title:SetText(tabData.name)
-
-        btn.activeIndicator = btn:CreateTexture(nil, "OVERLAY")
-        btn.activeIndicator:SetWidth(3)
-        btn.activeIndicator:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
-        btn.activeIndicator:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 2, 2)
-        btn.activeIndicator:SetColorTexture(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3], 1.0)
-        btn.activeIndicator:Hide()
-
-        btn:SetScript("OnClick", function()
-            BFM:SelectTab(tabID)
-        end)
-
-        btn:SetScript("OnEnter", function(tab)
-            if BFM.currentTab ~= tabID then
-                tab:SetBackdropColor(unpack(COLORS.tabHighlight))
-                tab:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+        for id, scroll in pairs(tabScrolls) do
+            if id == tabID then
+                scroll:Show()
+                if syncLists[id] then
+                    for _, widget in ipairs(syncLists[id]) do
+                        if widget.Sync then widget:Sync() end
+                    end
+                end
+            else
+                scroll:Hide()
             end
-        end)
-
-        btn:SetScript("OnLeave", function(tab)
-            if BFM.currentTab ~= tabID then
-                tab:SetBackdropColor(unpack(COLORS.tabNormal))
-                tab:SetBackdropBorderColor(unpack(COLORS.goldMuted))
-            end
-        end)
-
-        BFM.tabButtons[tabID] = btn
-
-        -- Create Category Container
-        local container = CreateFrame("Frame", "BFM_Container_" .. tabID, contentArea)
-        container:SetAllPoints(contentArea)
-        tabData.builder(BFM, container)
-        container:Hide()
-        BFM.tabContainers[tabID] = container
-
-        currentY = currentY + tabHeight + tabSpacing
+        end
     end
 
-    scrollChild:SetHeight(math.max(currentY, 1))
+    local lastBtn = nil
+    for _, def in ipairs(tabDefs) do
+        local btn = CreateStyledTabButton(tabBar, def.id, def.label, def.width, 24, function(id)
+            SelectTab(id)
+        end)
+        if lastBtn then
+            btn:SetPoint("LEFT", lastBtn, "RIGHT", 6, 0)
+        else
+            btn:SetPoint("LEFT", tabBar, "LEFT", 0, 0)
+        end
+        lastBtn = btn
+        tabBtns[def.id] = btn
+
+        -- ScrollFrame for this tab inside insetBox
+        local scroll = CreateFrame("ScrollFrame", "BFM_StandaloneScroll_" .. def.id, insetBox, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", insetBox, "TOPLEFT", 6, -6)
+        scroll:SetPoint("BOTTOMRIGHT", insetBox, "BOTTOMRIGHT", -26, 6)
+
+        local child = CreateFrame("Frame", nil, scroll)
+        child:SetSize(width - 50, 600)
+        scroll:SetScrollChild(child)
+
+        local sList = {}
+        syncLists[def.id] = sList
+        child.SyncAll = function()
+            for _, widget in ipairs(sList) do
+                if widget.Sync then widget:Sync() end
+            end
+        end
+
+        def.builder(BFM, child, sList, false)
+        scroll:Hide()
+        tabScrolls[def.id] = scroll
+    end
+
+    f.SyncAll = function()
+        for _, sList in pairs(syncLists) do
+            for _, widget in ipairs(sList) do
+                if widget.Sync then widget:Sync() end
+            end
+        end
+    end
 
     f:SetScript("OnShow", function()
-        local lastTab = (BFM.db and BFM.db.configWindow and BFM.db.configWindow.lastTab) or "minimap"
-        BFM:SelectTab(lastTab)
+        local last = (BFM.db and BFM.db.configWindow and BFM.db.configWindow.lastTab) or "general"
+        SelectTab(last)
     end)
 
     f:SetScript("OnHide", function()
@@ -822,59 +1102,6 @@ function BFM:CreateStandaloneConfigFrame()
     return f
 end
 
---[[-----------------------------------------------------------------------------
-    Tab Selection & Highlights
--------------------------------------------------------------------------------]]
-function BFM:SelectTab(tabID)
-    if not standaloneFrame then
-        self:CreateStandaloneConfigFrame()
-    end
-
-    if not self.tabContainers[tabID] then
-        tabID = "minimap"
-    end
-
-    self.currentTab = tabID
-
-    if BFM.db then
-        BFM.db.configWindow = BFM.db.configWindow or {}
-        BFM.db.configWindow.lastTab = tabID
-    end
-
-    local tabTitles = {
-        minimap = "Minimap Settings",
-        coordinates = "Coordinates & Overlays",
-        about = "About Bleakfiber's Maps",
-    }
-    standaloneFrame.contentTitle:SetText(tabTitles[tabID] or "Settings")
-
-    for id, container in pairs(self.tabContainers) do
-        if id == tabID then
-            container:Show()
-            if container.Sync then container:Sync() end
-        else
-            container:Hide()
-        end
-    end
-
-    for id, btn in pairs(self.tabButtons) do
-        if id == tabID then
-            btn:SetBackdropColor(unpack(COLORS.tabActive))
-            btn:SetBackdropBorderColor(unpack(COLORS.goldBorder))
-            btn.title:SetTextColor(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3])
-            btn.activeIndicator:Show()
-        else
-            btn:SetBackdropColor(unpack(COLORS.tabNormal))
-            btn:SetBackdropBorderColor(unpack(COLORS.goldMuted))
-            btn.title:SetTextColor(COLORS.whiteText[1], COLORS.whiteText[2], COLORS.whiteText[3])
-            btn.activeIndicator:Hide()
-        end
-    end
-end
-
---[[-----------------------------------------------------------------------------
-    Standalone Toggle & Show
--------------------------------------------------------------------------------]]
 function BFM:ToggleConfigUI()
     local f = self:CreateStandaloneConfigFrame()
     if f:IsShown() then
@@ -890,188 +1117,118 @@ function BFM:ShowConfigUI()
 end
 
 --[[-----------------------------------------------------------------------------
-    Master Config (BAC) Embed UI Builder
+    Master Config (BAC) Embed UI Builder (With Horizontal Tabs matching Quest Tracker)
 -------------------------------------------------------------------------------]]
-function BFM:BuildEmbedUI(parent)
+function BFM:BuildEmbedUI(parent, isMasterHub)
     if not parent then return end
+    isMasterHub = (isMasterHub ~= false)
+    parent.isMasterHub = isMasterHub
 
-    local scrollFrame = CreateFrame("ScrollFrame", "BFM_BACEmbedScrollFrame", parent, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-    scrollFrame:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -22, 0)
+    -- Top Horizontal Tab Bar
+    local tabBar = CreateFrame("Frame", "BFM_BAC_TabBar", parent)
+    tabBar:SetHeight(28)
+    tabBar:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
+    tabBar:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, 0)
 
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(parent:GetWidth() > 30 and (parent:GetWidth() - 25) or 480, 560)
-    scrollFrame:SetScrollChild(content)
+    -- Inset Content Box below Tabs
+    local insetBox = CreateFrame("Frame", "BFM_BAC_InsetBox", parent, BACKDROP_TEMPLATE)
+    insetBox:SetPoint("TOPLEFT", tabBar, "BOTTOMLEFT", 0, -4)
+    insetBox:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -4, 4)
+    insetBox:SetBackdrop(INSET_BACKDROP)
+    insetBox:SetBackdropColor(unpack(COLORS.contentBg))
+    insetBox:SetBackdropBorderColor(unpack(COLORS.goldMuted))
 
-    local syncList = {}
-    local yOfs = -10
+    local tabDefs = {
+        { id = "general",  label = "General Settings",   width = 140, builder = BFM.BuildGeneralTab },
+        { id = "minimap",  label = "Minimap Settings",   width = 140, builder = BFM.BuildMinimapTab },
+        { id = "worldmap", label = "World Map Settings", width = 150, builder = BFM.BuildWorldMapTab },
+    }
 
-    -- Section 1: Sizing & Geometry
-    CreateSectionHeader(content, "MINIMAP SIZING & GEOMETRY", 12, yOfs)
-    yOfs = yOfs - 36
+    local tabBtns = {}
+    local tabScrolls = {}
+    local syncLists = {}
 
-    local sizeSlider = CreateStyledSlider(content, "BFM_BAC_MinimapSize", "Minimap Size (Pixels):",
-        "Adjusts the dimensions of the square minimap in pixels (100 - 512px).",
-        100, 512, 5,
-        function() return BFM.db.minimap.size or 140 end,
-        function(val)
-            BFM.db.minimap.size = val
-            BFM:ApplySettings()
+    local function SelectEmbedTab(tabID)
+        if BFM.db and BFM.db.configWindow then
+            BFM.db.configWindow.lastTab = tabID
         end
-    )
-    sizeSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, sizeSlider)
 
-    local borderSlider = CreateStyledSlider(content, "BFM_BAC_BorderSize", "Border Thickness:",
-        "Controls the pixel thickness of the square minimap border.",
-        1, 5, 1,
-        function() return BFM.db.minimap.borderSize or 1 end,
-        function(val)
-            BFM.db.minimap.borderSize = val
-            BFM:ApplySettings()
+        for id, btn in pairs(tabBtns) do
+            btn:SetActive(id == tabID)
         end
-    )
-    borderSlider:SetPoint("LEFT", sizeSlider, "RIGHT", 40, 0)
-    table.insert(syncList, borderSlider)
 
-    yOfs = yOfs - 50
-
-    local colorBtn = CreateStyledButton(content, "Border Color", 120, 22, function()
-        local cur = BFM.db.minimap.borderColor or { r = 0, g = 0, b = 0, a = 1 }
-        OpenColorPicker(cur, function(r, g, b, a)
-            BFM.db.minimap.borderColor = { r = r, g = g, b = b, a = a }
-            BFM:ApplySettings()
-        end)
-    end, "Choose a custom color and opacity for the square minimap border.")
-    colorBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-
-    yOfs = yOfs - 40
-
-    -- Section 2: Movement & Positioning
-    CreateSectionHeader(content, "MOVEMENT & POSITIONING", 12, yOfs)
-    yOfs = yOfs - 34
-
-    local cbUnlock = CreateStyledCheckbox(content, "Unlock Minimap (Click & Drag)",
-        "Enables dragging the minimap freely across the screen. You can also hold Alt + Left Click to drag at any time.",
-        function() return BFM.db.minimap.unlocked == true end,
-        function(checked)
-            BFM.db.minimap.unlocked = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbUnlock:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbUnlock)
-
-    local resetBtn = CreateStyledButton(content, "Reset Position", 110, 22, function()
-        BleakfibersMapsForever:ResetPosition()
-        print("|cFFFFD100Bleakfiber's Maps|r: Minimap position reset to default.")
-    end, "Restores the minimap to its default top-right anchor position.")
-    resetBtn:SetPoint("LEFT", cbUnlock.Text, "RIGHT", 30, 0)
-
-    yOfs = yOfs - 40
-
-    -- Section 3: Features & Clutter
-    CreateSectionHeader(content, "FEATURES & CLUTTER", 12, yOfs)
-    yOfs = yOfs - 34
-
-    local cbQuest = CreateStyledCheckbox(content, "Square Quest Zone Indicator",
-        "Conforms quest objective boundaries to the square minimap perimeter, replacing the default circular quest blob rings.",
-        function() return BFM.db.minimap.questIndicator ~= false end,
-        function(checked)
-            BFM.db.minimap.questIndicator = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbQuest:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbQuest)
-
-    yOfs = yOfs - 28
-
-    local cbIcons = CreateStyledCheckbox(content, "Follow Square Minimap Perimeter",
-        "Constrains addon minimap buttons along the square perimeter rather than orbiting in a circle.",
-        function() return BFM.db.minimap.squareIcons ~= false end,
-        function(checked)
-            BFM.db.minimap.squareIcons = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbIcons:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbIcons)
-
-    yOfs = yOfs - 28
-
-    local cbDiel = CreateStyledCheckbox(content, "Hide Day/Night Cycle (DielFrame)",
-        "Hides the sun and moon dial texture docked to the MinimapCluster.",
-        function() return BFM.db.minimap.hideDielFrame ~= false end,
-        function(checked)
-            BFM.db.minimap.hideDielFrame = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbDiel:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbDiel)
-
-    yOfs = yOfs - 28
-
-    local cbZoom = CreateStyledCheckbox(content, "Enable Mouse Wheel Zoom",
-        "Allows scrolling the mouse wheel up and down on the minimap to zoom in and out with clamped boundaries.",
-        function() return BFM.db.minimap.enableMouseWheelZoom ~= false end,
-        function(checked)
-            BFM.db.minimap.enableMouseWheelZoom = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbZoom:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbZoom)
-
-    yOfs = yOfs - 40
-
-    -- Section 4: Coordinates & HUD
-    CreateSectionHeader(content, "COORDINATES & HUD OVERLAYS", 12, yOfs)
-    yOfs = yOfs - 34
-
-    local cbMinimapCoords = CreateStyledCheckbox(content, "Show Minimap Coordinates & Subzone Bar",
-        "Displays live player coordinates (xx.x, yy.y) and reactive subzone text docked at the bottom of the minimap.",
-        function() return BFM.db.minimap.showCoords ~= false end,
-        function(checked)
-            BFM.db.minimap.showCoords = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbMinimapCoords:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbMinimapCoords)
-
-    yOfs = yOfs - 28
-
-    local cbWorldCoords = CreateStyledCheckbox(content, "Show World Map Coordinate Overlay",
-        "Displays live player coordinates and cursor-hover coordinates docked at the bottom of the World Map canvas.",
-        function() return BFM.db.worldmap.showCoords ~= false end,
-        function(checked)
-            BFM.db.worldmap.showCoords = checked
-            BFM:ApplySettings()
-        end
-    )
-    cbWorldCoords:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
-    table.insert(syncList, cbWorldCoords)
-
-    yOfs = yOfs - 35
-    content:SetHeight(math.abs(yOfs))
-
-    local function SyncAll()
-        for _, widget in ipairs(syncList) do
-            if widget.Sync then widget:Sync() end
+        for id, scroll in pairs(tabScrolls) do
+            if id == tabID then
+                scroll:Show()
+                if syncLists[id] then
+                    for _, widget in ipairs(syncLists[id]) do
+                        if widget.Sync then widget:Sync() end
+                    end
+                end
+            else
+                scroll:Hide()
+            end
         end
     end
 
-    SyncAll()
-    parent:HookScript("OnShow", SyncAll)
+    local lastBtn = nil
+    for _, def in ipairs(tabDefs) do
+        local btn = CreateStyledTabButton(tabBar, def.id, def.label, def.width, 24, function(id)
+            SelectEmbedTab(id)
+        end)
+        if lastBtn then
+            btn:SetPoint("LEFT", lastBtn, "RIGHT", 6, 0)
+        else
+            btn:SetPoint("LEFT", tabBar, "LEFT", 0, 0)
+        end
+        lastBtn = btn
+        tabBtns[def.id] = btn
+
+        -- ScrollFrame for this tab
+        local scroll = CreateFrame("ScrollFrame", "BFM_BACScroll_" .. def.id, insetBox, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", insetBox, "TOPLEFT", 6, -6)
+        scroll:SetPoint("BOTTOMRIGHT", insetBox, "BOTTOMRIGHT", -26, 6)
+
+        local child = CreateFrame("Frame", nil, scroll)
+        child:SetSize(470, 600)
+        scroll:SetScrollChild(child)
+
+        local sList = {}
+        syncLists[def.id] = sList
+        child.SyncAll = function()
+            for _, widget in ipairs(sList) do
+                if widget.Sync then widget:Sync() end
+            end
+        end
+
+        def.builder(BFM, child, sList, true)
+        scroll:Hide()
+        tabScrolls[def.id] = scroll
+    end
+
+    local function SyncAllTabs()
+        for _, sList in pairs(syncLists) do
+            for _, widget in ipairs(sList) do
+                if widget.Sync then widget:Sync() end
+            end
+        end
+    end
+
+    parent:HookScript("OnShow", function()
+        local last = (BFM.db and BFM.db.configWindow and BFM.db.configWindow.lastTab) or "general"
+        SelectEmbedTab(last)
+        SyncAllTabs()
+    end)
+
     parent:HookScript("OnHide", function()
         if BFM.db and BFM.db.minimap and BFM.db.minimap.unlocked then
             BFM.db.minimap.unlocked = false
             BFM:ApplySettings()
         end
     end)
-    parent.refresh = SyncAll
+
+    parent.refresh = SyncAllTabs
+    SelectEmbedTab((BFM.db and BFM.db.configWindow and BFM.db.configWindow.lastTab) or "general")
 
     return parent
 end

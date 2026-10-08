@@ -152,20 +152,81 @@ function MinimapCoords:CreateInfoBar()
         elapsedTimer = elapsedTimer + dt
         if elapsedTimer >= BFM.Constants.COORDS_UPDATE_INTERVAL then
             elapsedTimer = 0
-            MinimapCoords:UpdateCoordinates()
+            if MinimapCoords:IsQuestTrackerLocationBarActive() then
+                MinimapCoords:UpdateVisibility()
+            else
+                MinimapCoords:UpdateCoordinates()
+            end
         end
     end)
 
-    -- Zone Change Events
+    -- Zone Change Events & Quest Tracker Watcher
     local eventFrame = CreateFrame("Frame")
     eventFrame:RegisterEvent("ZONE_CHANGED")
     eventFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
     eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    eventFrame:SetScript("OnEvent", function()
+    eventFrame:RegisterEvent("ADDON_LOADED")
+    eventFrame:SetScript("OnEvent", function(self, event, arg1)
+        MinimapCoords:HookQuestTracker()
         MinimapCoords:UpdateZoneText()
         MinimapCoords:UpdateCoordinates()
+        MinimapCoords:UpdateVisibility()
     end)
+end
+
+function MinimapCoords:IsQuestTrackerLocationBarActive()
+    local locFrame = _G["BleakfiberQuestTrackerLocationBar"]
+    if locFrame and locFrame:IsShown() then
+        return true
+    end
+
+    local BQT = _G["BleakfibersQuestTrackerForever"] or _G["BleakfiberQuestTracker"]
+    if BQT and BQT.GetDB then
+        local db = BQT:GetDB()
+        if db and db.databars and db.databars.enableLocationBar then
+            return true
+        end
+    end
+
+    local rawDB = _G["BleakfiberTrackerDB"]
+    if rawDB then
+        if rawDB.databars and rawDB.databars.enableLocationBar then
+            return true
+        end
+        if rawDB.profiles then
+            for _, prof in pairs(rawDB.profiles) do
+                if type(prof) == "table" and prof.databars and prof.databars.enableLocationBar then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
+
+function MinimapCoords:HookQuestTracker()
+    local locFrame = _G["BleakfiberQuestTrackerLocationBar"]
+    if locFrame and not self.locFrameHooked then
+        self.locFrameHooked = true
+        locFrame:HookScript("OnShow", function()
+            MinimapCoords:UpdateVisibility()
+        end)
+        locFrame:HookScript("OnHide", function()
+            MinimapCoords:UpdateVisibility()
+        end)
+    end
+
+    local BQT = _G["BleakfibersQuestTrackerForever"] or _G["BleakfiberQuestTracker"]
+    if BQT and not self.bqtHooked then
+        self.bqtHooked = true
+        if BQT.ApplySettings then
+            hooksecurefunc(BQT, "ApplySettings", function()
+                MinimapCoords:UpdateVisibility()
+            end)
+        end
+    end
 end
 
 function MinimapCoords:UpdateLayout()
@@ -180,6 +241,12 @@ end
 function MinimapCoords:UpdateVisibility()
     if not infoBar then return end
     local shouldShow = BFM.db and BFM.db.minimap and (BFM.db.minimap.showCoords ~= false)
+
+    -- Auto-hide built-in location bar if Bleakfiber's Quest Tracker location databar is active
+    if shouldShow and self:IsQuestTrackerLocationBarActive() then
+        shouldShow = false
+    end
+
     if shouldShow then
         infoBar:Show()
     else
@@ -187,15 +254,16 @@ function MinimapCoords:UpdateVisibility()
     end
 end
 
-
 function MinimapCoords:OnInitialize()
     self:CreateInfoBar()
+    self:HookQuestTracker()
     self:UpdateZoneText()
     self:UpdateCoordinates()
     self:UpdateVisibility()
 end
 
 function MinimapCoords:OnEnable()
+    self:HookQuestTracker()
     self:UpdateZoneText()
     self:UpdateCoordinates()
     self:UpdateVisibility()

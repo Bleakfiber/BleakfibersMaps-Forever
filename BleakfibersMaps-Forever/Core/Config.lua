@@ -1,13 +1,23 @@
+--[[
+    Bleakfiber's Maps - Forever
+    Core/Config.lua - Data Layer: DB Defaults, Profiles, Get/Set Accessors, & Notification Hooks
+]]
+
 local addonName, BFM = ...
 
-local defaultSettings = {
+local defaultProfileSettings = {
     minimap = {
         square = true,
         squareIcons = true,
         hideDielFrame = true,
+        borderStyle = "flat",
+        classColorBorder = false,
         borderSize = 1,
         borderColor = { r = 0, g = 0, b = 0, a = 1 },
         backdropColor = { r = 0, g = 0, b = 0, a = 0.8 },
+        trackerScale = 0.85,
+        calendarScale = 0.80,
+        timeScale = 0.85,
         size = 140,
         unlocked = false,
         position = nil,
@@ -21,45 +31,183 @@ local defaultSettings = {
         showCoords = true,
         overlayHeight = 22,
         backdropColor = { r = 0, g = 0, b = 0, a = 0.65 },
-    },
-    configWindow = {
-        width = 760,
-        height = 520,
-        point = "CENTER",
-        relativePoint = "CENTER",
-        xOfs = 0,
-        yOfs = 0,
-        lastTab = "minimap",
+        fogClear = true,
+        fogColor = { r = 0.90, g = 0.90, b = 1.00 },
+        fogAlpha = 0.60,
     },
 }
 
+local defaultWindowSettings = {
+    width = 760,
+    height = 520,
+    point = "CENTER",
+    relativePoint = "CENTER",
+    xOfs = 0,
+    yOfs = 0,
+    lastTab = "general",
+}
+
+local function DeepCopy(src)
+    if type(src) ~= "table" then return src end
+    local copy = {}
+    for k, v in pairs(src) do
+        copy[k] = type(v) == "table" and DeepCopy(v) or v
+    end
+    return copy
+end
+
+local function MergeDefaults(dst, src)
+    for k, v in pairs(src) do
+        if type(v) == "table" then
+            if type(dst[k]) ~= "table" then
+                dst[k] = {}
+            end
+            MergeDefaults(dst[k], v)
+        elseif dst[k] == nil then
+            dst[k] = v
+        end
+    end
+end
+
+--[[-----------------------------------------------------------------------------
+    Database & Profile Initialization (With Auto-Migration from Legacy Schemas)
+-------------------------------------------------------------------------------]]
 function BFM:InitDB()
     if type(BleakfibersMapsDB) ~= "table" then
         BleakfibersMapsDB = {}
     end
 
-    local function CopyDefaults(src, dst)
-        for k, v in pairs(src) do
-            if type(v) == "table" then
-                if type(dst[k]) ~= "table" then
-                    dst[k] = {}
-                end
-                CopyDefaults(v, dst[k])
-            elseif dst[k] == nil then
-                dst[k] = v
-            end
+    -- Persistent UI window bounds
+    if type(BleakfibersMapsDB.configWindow) ~= "table" then
+        BleakfibersMapsDB.configWindow = DeepCopy(defaultWindowSettings)
+    else
+        MergeDefaults(BleakfibersMapsDB.configWindow, defaultWindowSettings)
+    end
+
+    -- Profile layer initialization & backward-compatibility migration
+    if type(BleakfibersMapsDB.profiles) ~= "table" then
+        BleakfibersMapsDB.profiles = {}
+
+        -- If user upgraded from v1.0.01 - v1.0.04 with flat settings:
+        if type(BleakfibersMapsDB.minimap) == "table" or type(BleakfibersMapsDB.worldmap) == "table" then
+            BleakfibersMapsDB.profiles["Default"] = {
+                minimap = BleakfibersMapsDB.minimap or DeepCopy(defaultProfileSettings.minimap),
+                worldmap = BleakfibersMapsDB.worldmap or DeepCopy(defaultProfileSettings.worldmap),
+            }
+            BleakfibersMapsDB.minimap = nil
+            BleakfibersMapsDB.worldmap = nil
         end
     end
 
-    CopyDefaults(defaultSettings, BleakfibersMapsDB)
-    BFM.db = BleakfibersMapsDB
+    if not BleakfibersMapsDB.activeProfile or BleakfibersMapsDB.activeProfile == "" then
+        BleakfibersMapsDB.activeProfile = "Default"
+    end
+
+    if not BleakfibersMapsDB.profiles[BleakfibersMapsDB.activeProfile] then
+        BleakfibersMapsDB.profiles[BleakfibersMapsDB.activeProfile] = DeepCopy(defaultProfileSettings)
+    end
+
+    -- Ensure active profile has all required sub-tables & defaults
+    MergeDefaults(BleakfibersMapsDB.profiles[BleakfibersMapsDB.activeProfile], defaultProfileSettings)
+
+    -- Bind active profile to BFM.db and configWindow
+    BFM.db = BleakfibersMapsDB.profiles[BleakfibersMapsDB.activeProfile]
+    BFM.db.configWindow = BleakfibersMapsDB.configWindow
 end
 
+--[[-----------------------------------------------------------------------------
+    Profile Accessors & Management
+-------------------------------------------------------------------------------]]
+function BFM:GetActiveProfile()
+    return (BleakfibersMapsDB and BleakfibersMapsDB.activeProfile) or "Default"
+end
+
+function BFM:GetProfiles()
+    local list = {}
+    if BleakfibersMapsDB and BleakfibersMapsDB.profiles then
+        for name in pairs(BleakfibersMapsDB.profiles) do
+            table.insert(list, name)
+        end
+    end
+    if #list == 0 then table.insert(list, "Default") end
+    table.sort(list)
+    return list
+end
+
+function BFM:SetActiveProfile(name)
+    if not name or name == "" then return end
+    self:InitDB()
+    if not BleakfibersMapsDB.profiles[name] then
+        BleakfibersMapsDB.profiles[name] = DeepCopy(defaultProfileSettings)
+    else
+        MergeDefaults(BleakfibersMapsDB.profiles[name], defaultProfileSettings)
+    end
+    BleakfibersMapsDB.activeProfile = name
+    BFM.db = BleakfibersMapsDB.profiles[name]
+    BFM.db.configWindow = BleakfibersMapsDB.configWindow
+
+    if BleakfibersMapsForever and BleakfibersMapsForever.ApplySettings then
+        BleakfibersMapsForever:ApplySettings()
+    end
+
+    if BFM.standaloneFrame and BFM.standaloneFrame:IsShown() and BFM.standaloneFrame.SyncAll then
+        BFM.standaloneFrame:SyncAll()
+    end
+end
+
+function BFM:CreateProfile(name)
+    if not name or name == "" then return end
+    self:InitDB()
+    if not BleakfibersMapsDB.profiles[name] then
+        BleakfibersMapsDB.profiles[name] = DeepCopy(defaultProfileSettings)
+    end
+    self:SetActiveProfile(name)
+end
+
+function BFM:DeleteProfile(name)
+    if not name or name == "Default" then return end
+    self:InitDB()
+    BleakfibersMapsDB.profiles[name] = nil
+    if BleakfibersMapsDB.activeProfile == name then
+        self:SetActiveProfile("Default")
+    end
+end
+
+function BFM:CopyProfile(fromName, toName)
+    self:InitDB()
+    if BleakfibersMapsDB.profiles[fromName] then
+        BleakfibersMapsDB.profiles[toName] = DeepCopy(BleakfibersMapsDB.profiles[fromName])
+    end
+end
+
+function BFM:ResetProfile(name)
+    name = name or self:GetActiveProfile()
+    self:InitDB()
+    BleakfibersMapsDB.profiles[name] = DeepCopy(defaultProfileSettings)
+    if BleakfibersMapsDB.activeProfile == name then
+        BFM.db = BleakfibersMapsDB.profiles[name]
+        BFM.db.configWindow = BleakfibersMapsDB.configWindow
+        if BleakfibersMapsForever and BleakfibersMapsForever.ApplySettings then
+            BleakfibersMapsForever:ApplySettings()
+        end
+    end
+    if BFM.standaloneFrame and BFM.standaloneFrame:IsShown() and BFM.standaloneFrame.SyncAll then
+        BFM.standaloneFrame:SyncAll()
+    end
+end
+
+--[[-----------------------------------------------------------------------------
+    Settings Change Notification Dispatcher
+-------------------------------------------------------------------------------]]
 function BFM:NotifySettingsChanged(settingName)
     local squareModule = BFM.modules["SquareMinimap"]
     if squareModule then
-        if settingName == "borderSize" or settingName == "borderColor" or settingName == "backdropColor" then
+        if settingName == "borderSize" or settingName == "borderColor" or settingName == "backdropColor" or settingName == "borderStyle" or settingName == "classColorBorder" then
             squareModule:UpdateBorder()
+        elseif settingName == "trackerScale" or settingName == "calendarScale" then
+            squareModule:PositionElements()
+        elseif settingName == "timeScale" then
+            squareModule:PositionClock()
         elseif settingName == "hideDielFrame" then
             squareModule:UpdateDielFrame()
         elseif settingName == "squareIcons" then
@@ -81,9 +229,16 @@ function BFM:NotifySettingsChanged(settingName)
     end
 
     local worldMapModule = BFM.modules["WorldMapCoords"]
-    if worldMapModule and settingName == "worldMapCoords" then
+    if worldMapModule and (settingName == "worldMapCoords" or settingName == "showCoords") then
         if worldMapModule.UpdateVisibility then
             worldMapModule:UpdateVisibility()
+        end
+    end
+
+    local fogModule = BFM.modules["WorldMapFog"]
+    if fogModule and (settingName == "fogClear" or settingName == "fogColor" or settingName == "fogAlpha") then
+        if fogModule.Refresh then
+            fogModule:Refresh()
         end
     end
 end
