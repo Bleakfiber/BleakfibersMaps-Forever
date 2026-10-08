@@ -138,7 +138,8 @@ function BFM:SetActiveProfile(name)
     if not name or name == "" then return end
     self:InitDB()
     if not BleakfibersMapsDB.profiles[name] then
-        BleakfibersMapsDB.profiles[name] = DeepCopy(defaultProfileSettings)
+        local cur = BleakfibersMapsDB.profiles[BleakfibersMapsDB.activeProfile]
+        BleakfibersMapsDB.profiles[name] = DeepCopy(cur or defaultProfileSettings)
     else
         MergeDefaults(BleakfibersMapsDB.profiles[name], defaultProfileSettings)
     end
@@ -155,12 +156,25 @@ function BFM:SetActiveProfile(name)
     end
 end
 
-function BFM:CreateProfile(name)
+function BFM:CreateProfile(name, fromName)
     if not name or name == "" then return end
     self:InitDB()
+    -- Never overwrite existing profile!
     if not BleakfibersMapsDB.profiles[name] then
-        BleakfibersMapsDB.profiles[name] = DeepCopy(defaultProfileSettings)
+        local source = fromName and BleakfibersMapsDB.profiles[fromName]
+        if not source then
+            source = BleakfibersMapsDB.profiles[self:GetActiveProfile()] or defaultProfileSettings
+        end
+        BleakfibersMapsDB.profiles[name] = DeepCopy(source)
     end
+    self:SetActiveProfile(name)
+end
+
+function BFM:SaveCurrentAs(name)
+    if not name or name == "" then return end
+    self:InitDB()
+    local cur = BleakfibersMapsDB.profiles[self:GetActiveProfile()]
+    BleakfibersMapsDB.profiles[name] = DeepCopy(cur or defaultProfileSettings)
     self:SetActiveProfile(name)
 end
 

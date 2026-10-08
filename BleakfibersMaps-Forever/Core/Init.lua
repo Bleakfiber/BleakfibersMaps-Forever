@@ -5,7 +5,7 @@ BleakfibersMapsForever = BleakfibersMapsForever or BFM
 _G["BleakfibersMapsForever"] = BleakfibersMapsForever
 
 BFM.Title = "Bleakfiber's Maps"
-BFM.Version = "1.0.05"
+BFM.Version = "1.0.6"
 BFM.modules = {}
 
 function BFM:RegisterModule(name, module)
@@ -116,13 +116,14 @@ function BleakfibersMapsForever:RegisterWithMasterConfig()
 
         -- Synchronized Profiles Contract
         profiles = {
-            GetCurrent = function() return BFM:GetActiveProfile() end,
-            SetCurrent = function(profileKey) BFM:SetActiveProfile(profileKey) end,
-            List       = function() return BFM:GetProfiles() end,
-            Create     = function(profileKey) BFM:CreateProfile(profileKey) end,
-            Delete     = function(profileKey) BFM:DeleteProfile(profileKey) end,
-            Copy       = function(fromKey, toKey) BFM:CopyProfile(fromKey, toKey) end,
-            Reset      = function(profileKey) BFM:ResetProfile(profileKey) end,
+            GetCurrent    = function() return BFM:GetActiveProfile() end,
+            SetCurrent    = function(profileKey) BFM:SetActiveProfile(profileKey) end,
+            SaveCurrentAs = function(profileKey) BFM:SaveCurrentAs(profileKey) end,
+            List          = function() return BFM:GetProfiles() end,
+            Create        = function(profileKey, from) BFM:CreateProfile(profileKey, from) end,
+            Delete        = function(profileKey) BFM:DeleteProfile(profileKey) end,
+            Copy          = function(fromKey, toKey) BFM:CopyProfile(fromKey, toKey) end,
+            Reset         = function(profileKey) BFM:ResetProfile(profileKey) end,
         },
 
         -- Unified Movers Contract

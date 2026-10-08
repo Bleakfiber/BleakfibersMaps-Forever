@@ -58,6 +58,49 @@ local FOG_PRESETS = {
 
 local standaloneFrame
 
+local function SetupAutoScroll(scrollFrame, scrollChild)
+    if not (scrollFrame and scrollChild) then return end
+    local scrollBar = _G[scrollFrame:GetName() and (scrollFrame:GetName() .. "ScrollBar")]
+
+    local function UpdateScrollState()
+        local frameHeight = scrollFrame:GetHeight()
+        local childHeight = scrollChild:GetHeight()
+        if not frameHeight or frameHeight <= 0 then return end
+        if childHeight <= frameHeight + 2 then
+            if scrollBar and scrollBar:IsShown() then
+                scrollBar:Hide()
+            end
+            scrollFrame:EnableMouseWheel(false)
+            scrollFrame:SetVerticalScroll(0)
+        else
+            if scrollBar and not scrollBar:IsShown() then
+                scrollBar:Show()
+            end
+            scrollFrame:EnableMouseWheel(true)
+        end
+    end
+
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local frameHeight = self:GetHeight()
+        local childHeight = scrollChild:GetHeight()
+        if not frameHeight or childHeight <= frameHeight + 2 then return end
+        local cur = self:GetVerticalScroll()
+        local maxScroll = math.max(0, childHeight - frameHeight)
+        local step = 32
+        local newScroll = cur - (delta * step)
+        if newScroll < 0 then newScroll = 0 end
+        if newScroll > maxScroll then newScroll = maxScroll end
+        self:SetVerticalScroll(newScroll)
+    end)
+
+    scrollFrame:HookScript("OnSizeChanged", UpdateScrollState)
+    scrollChild:HookScript("OnSizeChanged", UpdateScrollState)
+    scrollFrame:HookScript("OnShow", UpdateScrollState)
+    UpdateScrollState()
+    return UpdateScrollState
+end
+
 --[[-----------------------------------------------------------------------------
     Helper: Section Header
 -------------------------------------------------------------------------------]]
@@ -86,6 +129,8 @@ local function CreateStyledCheckbox(parent, labelText, tooltipText, getFunc, set
     local text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     text:SetPoint("LEFT", cb, "RIGHT", 6, 1)
     text:SetText(labelText)
+    text:SetWordWrap(true)
+    text:SetJustifyH("LEFT")
     cb.Text = text
 
     if tooltipText then
@@ -1064,6 +1109,7 @@ function BFM:CreateStandaloneConfigFrame()
         local child = CreateFrame("Frame", nil, scroll)
         child:SetSize(width - 50, 600)
         scroll:SetScrollChild(child)
+        SetupAutoScroll(scroll, child)
 
         local sList = {}
         syncLists[def.id] = sList
@@ -1192,6 +1238,7 @@ function BFM:BuildEmbedUI(parent, isMasterHub)
         local child = CreateFrame("Frame", nil, scroll)
         child:SetSize(470, 600)
         scroll:SetScrollChild(child)
+        SetupAutoScroll(scroll, child)
 
         local sList = {}
         syncLists[def.id] = sList
