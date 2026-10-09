@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.0.8] - 2026-10-09
+
+### Changed
+- Fixed dropdown symbol glyphs showing as broken rectangular boxes across fonts.
+
 ## [1.0.7] - 2026-10-08
 
 ### Changed

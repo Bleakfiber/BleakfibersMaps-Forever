@@ -456,7 +456,7 @@ local function CreateStyledDropdown(parent, labelPrefix, width, height, optionsL
 
     local arrow = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     arrow:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
-    arrow:SetText("|cFFFFD100▼|r")
+    arrow:SetText("|cFFFFD100v|r")
 
     local function GetOptions()
         if type(optionsList) == "function" then
@@ -562,7 +562,7 @@ local function CreateStyledDropdown(parent, labelPrefix, width, height, optionsL
             b.isActive = isActive
             if isActive then
                 selectedIndex = i
-                b.text:SetText("|cFFFFD100✔ |r" .. itm.label)
+                b.text:SetText("|cFFFFD100* |r" .. itm.label)
                 b:SetBackdropColor(0.22, 0.19, 0.12, 0.95)
                 b:SetBackdropBorderColor(unpack(COLORS.goldBorder))
             else
