@@ -113,6 +113,8 @@ function MinimapCoords:CreateInfoBar()
     coordsText:SetWidth(50)
     coordsText:SetJustifyH("RIGHT")
 
+    self:UpdateFonts()
+
     -- Click action: toggle World Map
     infoBar:EnableMouse(true)
     infoBar:RegisterForClicks("AnyUp")
@@ -229,8 +231,31 @@ function MinimapCoords:HookQuestTracker()
     end
 end
 
+function MinimapCoords:UpdateFonts()
+    if not infoBar then return end
+    local db = (BFM.db and BFM.db.minimap) or {}
+    local fontName = db.coordsFont or "Nata Sans Bold"
+    local fontSize = db.coordsFontSize or 10
+    local outline = db.coordsFontOutline or "OUTLINE"
+    if outline == "None" or outline == "NONE" then outline = "" end
+
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    local fontPath = (LSM and LSM:Fetch("font", fontName, true))
+    if not fontPath or fontPath == "" then
+        fontPath = "Fonts\\FRIZQT__.TTF"
+    end
+
+    if zoneText then
+        pcall(function() zoneText:SetFont(fontPath, fontSize, outline) end)
+    end
+    if coordsText then
+        pcall(function() coordsText:SetFont(fontPath, fontSize, outline) end)
+    end
+end
+
 function MinimapCoords:UpdateLayout()
     if not infoBar then return end
+    self:UpdateFonts()
     infoBar:ClearAllPoints()
     infoBar:SetPoint("BOTTOMLEFT", Minimap, "BOTTOMLEFT", 0, 0)
     infoBar:SetPoint("BOTTOMRIGHT", Minimap, "BOTTOMRIGHT", 0, 0)

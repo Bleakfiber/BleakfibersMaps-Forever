@@ -88,6 +88,8 @@ function WorldMapCoords:CreateOverlayFrame(mapCanvas)
     cursorText:SetJustifyH("RIGHT")
     cursorText:SetFormattedText(BFM.L["MAP_CURSOR_COORDS"], BFM.L["COORDS_NA"])
 
+    self:UpdateFonts()
+
     -- Continuous live update loop
     overlayFrame:SetScript("OnUpdate", function(self, dt)
         updateTimer = updateTimer + dt
@@ -96,6 +98,28 @@ function WorldMapCoords:CreateOverlayFrame(mapCanvas)
             WorldMapCoords:UpdateCoords()
         end
     end)
+end
+
+function WorldMapCoords:UpdateFonts()
+    if not overlayFrame then return end
+    local db = (BFM.db and BFM.db.worldmap) or {}
+    local fontName = db.coordsFont or "Nata Sans Bold"
+    local fontSize = db.coordsFontSize or 11
+    local outline = db.coordsFontOutline or "OUTLINE"
+    if outline == "None" or outline == "NONE" then outline = "" end
+
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    local fontPath = (LSM and LSM:Fetch("font", fontName, true))
+    if not fontPath or fontPath == "" then
+        fontPath = "Fonts\\FRIZQT__.TTF"
+    end
+
+    if playerText then
+        pcall(function() playerText:SetFont(fontPath, fontSize, outline) end)
+    end
+    if cursorText then
+        pcall(function() cursorText:SetFont(fontPath, fontSize, outline) end)
+    end
 end
 
 function WorldMapCoords:UpdateCoords()

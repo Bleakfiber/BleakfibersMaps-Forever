@@ -38,13 +38,15 @@ function BleakfibersMapsForever:ApplySettings()
 
     local coordsModule = self.modules["MinimapCoords"]
     if coordsModule then
+        if coordsModule.UpdateFonts then coordsModule:UpdateFonts() end
         if coordsModule.UpdateVisibility then coordsModule:UpdateVisibility() end
         if coordsModule.UpdateLayout then coordsModule:UpdateLayout() end
     end
 
     local worldMapModule = self.modules["WorldMapCoords"]
-    if worldMapModule and worldMapModule.UpdateVisibility then
-        worldMapModule:UpdateVisibility()
+    if worldMapModule then
+        if worldMapModule.UpdateFonts then worldMapModule:UpdateFonts() end
+        if worldMapModule.UpdateVisibility then worldMapModule:UpdateVisibility() end
     end
 
     local fogModule = self.modules["WorldMapFog"]

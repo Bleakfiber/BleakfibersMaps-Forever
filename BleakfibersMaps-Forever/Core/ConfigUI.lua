@@ -56,6 +56,12 @@ local FOG_PRESETS = {
     { key = "fullvis",    label = "Full Visibility",  r = 1.00, g = 1.00, b = 1.00, a = 1.00 },
 }
 
+local OUTLINE_OPTIONS = {
+    { key = "OUTLINE",      label = "Outline" },
+    { key = "THICKOUTLINE", label = "Thick Outline" },
+    { key = "NONE",         label = "None" },
+}
+
 local standaloneFrame
 
 local function SetupAutoScroll(scrollFrame, scrollChild)
@@ -332,39 +338,296 @@ local function OpenColorPicker(initialColor, onColorChanged)
 end
 
 --[[-----------------------------------------------------------------------------
-    Helper: Cycle Button
+    Helper: Dropdown & Font Dropdown (Custom Dark Slate & Gold Popup)
 -------------------------------------------------------------------------------]]
-local function CreateStyledCycleButton(parent, labelPrefix, width, height, optionsList, getFunc, setFunc, tooltipText)
-    local btn = CreateStyledButton(parent, "", width or 190, height or 22, nil, tooltipText)
+local sharedDropdownMenu = nil
+local sharedDropdownCatcher = nil
 
-    local function GetCurrentIndex()
-        local cur = getFunc and getFunc()
-        for i, opt in ipairs(optionsList) do
-            if opt.key == cur then return i end
+local function GetOrCreateLocalDropdownMenu()
+    if sharedDropdownMenu then return sharedDropdownMenu end
+
+    sharedDropdownCatcher = CreateFrame("Button", "BFM_DropdownCatcher", UIParent)
+    sharedDropdownCatcher:SetFrameStrata("FULLSCREEN_DIALOG")
+    sharedDropdownCatcher:SetFrameLevel(98)
+    sharedDropdownCatcher:SetAllPoints(UIParent)
+    sharedDropdownCatcher:EnableMouse(true)
+    sharedDropdownCatcher:Hide()
+    sharedDropdownCatcher:SetScript("OnClick", function()
+        if sharedDropdownMenu then sharedDropdownMenu:Hide() end
+    end)
+
+    local menu = CreateFrame("Frame", "BFM_DropdownMenu", UIParent, BACKDROP_TEMPLATE)
+    menu:SetFrameStrata("FULLSCREEN_DIALOG")
+    menu:SetFrameLevel(99)
+    menu:SetClampedToScreen(true)
+    menu:SetBackdrop(INSET_BACKDROP)
+    menu:SetBackdropColor(0.08, 0.10, 0.13, 0.98)
+    menu:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+    menu:EnableMouse(true)
+    menu:Hide()
+
+    menu:SetScript("OnShow", function()
+        sharedDropdownCatcher:Show()
+    end)
+    menu:SetScript("OnHide", function()
+        sharedDropdownCatcher:Hide()
+    end)
+
+    local scrollFrame = CreateFrame("ScrollFrame", "BFM_DropdownScrollFrame", menu, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, -4)
+    scrollFrame:SetPoint("BOTTOMRIGHT", menu, "BOTTOMRIGHT", -22, 4)
+    menu.scrollFrame = scrollFrame
+
+    local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetSize(150, 100)
+    scrollFrame:SetScrollChild(scrollChild)
+    menu.scrollChild = scrollChild
+
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll()
+        local maxS = math.max(0, scrollChild:GetHeight() - self:GetHeight())
+        local newS = math.min(maxS, math.max(0, cur - (delta * 22)))
+        self:SetVerticalScroll(newS)
+    end)
+
+    menu.buttons = {}
+    sharedDropdownMenu = menu
+    return menu
+end
+
+local function NormalizeDropdownItems(items)
+    local list = {}
+    if type(items) == "table" then
+        if #items > 0 then
+            for _, item in ipairs(items) do
+                if type(item) == "table" then
+                    local val = (item.value ~= nil) and item.value or ((item.key ~= nil) and item.key or item[1])
+                    local text = item.text or item.label or item[2] or tostring(val)
+                    table.insert(list, { key = val, label = text, value = val, text = text })
+                else
+                    table.insert(list, { key = item, label = tostring(item), value = item, text = tostring(item) })
+                end
+            end
+        else
+            for k, v in pairs(items) do
+                table.insert(list, { key = k, label = tostring(v), value = k, text = tostring(v) })
+            end
+            table.sort(list, function(a, b) return a.label:lower() < b.label:lower() end)
         end
-        return 1
+    end
+    return list
+end
+
+local function GetAvailableFonts()
+    local fonts = {}
+    local seen = {}
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if LSM and LSM.List then
+        local lsmList = LSM:List("font")
+        if lsmList then
+            for _, f in ipairs(lsmList) do
+                if not seen[f] then
+                    table.insert(fonts, { key = f, label = f })
+                    seen[f] = true
+                end
+            end
+        end
+    end
+    local standardFonts = {
+        "Nata Sans Regular", "Nata Sans Bold", "Nata Sans Medium",
+        "BleakUI Regular", "BleakUI Bold",
+        "Friz Quadrata TT", "Arial Narrow", "Skurri", "Morpheus"
+    }
+    for _, f in ipairs(standardFonts) do
+        if not seen[f] then
+            table.insert(fonts, { key = f, label = f })
+            seen[f] = true
+        end
+    end
+    table.sort(fonts, function(a, b) return a.label:lower() < b.label:lower() end)
+    return fonts
+end
+
+local function CreateStyledDropdown(parent, labelPrefix, width, height, optionsList, getFunc, setFunc, tooltipText, isFont)
+    width = width or 190
+    height = height or 22
+    local btn = CreateStyledButton(parent, "", width, height, nil, tooltipText)
+
+    local arrow = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    arrow:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+    arrow:SetText("|cFFFFD100▼|r")
+
+    local function GetOptions()
+        if type(optionsList) == "function" then
+            return NormalizeDropdownItems(optionsList())
+        end
+        return NormalizeDropdownItems(optionsList)
     end
 
     local function UpdateLabel()
-        local idx = GetCurrentIndex()
-        local opt = optionsList[idx]
-        btn.Text:SetText(string.format("%s: |cFFFFD100%s|r", labelPrefix, opt and opt.label or "Default"))
+        local cur = getFunc and getFunc()
+        local opts = GetOptions()
+        local foundLabel = tostring(cur or "Default")
+        for _, opt in ipairs(opts) do
+            if opt.key == cur or opt.value == cur then
+                foundLabel = opt.label or opt.text
+                break
+            end
+        end
+        if labelPrefix and labelPrefix ~= "" then
+            btn.Text:SetText(string.format("%s: |cFFFFD100%s|r", labelPrefix, foundLabel))
+        else
+            btn.Text:SetText(string.format("|cFFFFD100%s|r", foundLabel))
+        end
+        if isFont then
+            local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+            local fPath = LSM and LSM:Fetch("font", cur, true)
+            if fPath then
+                pcall(function() btn.Text:SetFont(fPath, 11, "") end)
+            end
+        end
     end
 
     btn:SetScript("OnClick", function(self)
         PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
-        local idx = GetCurrentIndex()
-        local nextIdx = (idx % #optionsList) + 1
-        local nextOpt = optionsList[nextIdx]
-        if setFunc and nextOpt then
-            setFunc(nextOpt.key, nextOpt)
+        local menu = GetOrCreateLocalDropdownMenu()
+        if menu:IsShown() and menu.currentButton == self then
+            menu:Hide()
+            return
         end
-        UpdateLabel()
+
+        local curOpts = GetOptions()
+        local curVal = getFunc and getFunc()
+        menu.currentButton = self
+
+        for _, b in ipairs(menu.buttons) do b:Hide() end
+
+        local btnHeight = 22
+        local maxVisible = 8
+        local visibleCount = math.min(#curOpts, maxVisible)
+        local menuWidth = math.max(width, 160)
+        local totalContentHeight = #curOpts * btnHeight
+
+        local hasScroll = (#curOpts > maxVisible)
+        menu.scrollChild:SetSize(menuWidth - (hasScroll and 28 or 10), totalContentHeight)
+
+        local scrollBar = _G["BFM_DropdownScrollFrameScrollBar"]
+        if scrollBar then
+            if hasScroll then
+                scrollBar:Show()
+                menu.scrollFrame:SetPoint("BOTTOMRIGHT", menu, "BOTTOMRIGHT", -22, 4)
+            else
+                scrollBar:Hide()
+                menu.scrollFrame:SetPoint("BOTTOMRIGHT", menu, "BOTTOMRIGHT", -4, 4)
+            end
+        end
+
+        local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+        local selectedIndex = 1
+
+        for i, itm in ipairs(curOpts) do
+            local b = menu.buttons[i]
+            if not b then
+                b = CreateFrame("Button", nil, menu.scrollChild, BACKDROP_TEMPLATE)
+                b:SetHeight(btnHeight)
+                b:SetBackdrop(INSET_BACKDROP)
+
+                b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+                b.text:SetPoint("LEFT", b, "LEFT", 8, 0)
+                b.text:SetPoint("RIGHT", b, "RIGHT", -8, 0)
+                b.text:SetJustifyH("LEFT")
+
+                b:SetScript("OnEnter", function(s)
+                    s:SetBackdropColor(0.20, 0.22, 0.28, 0.95)
+                    s:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+                end)
+                b:SetScript("OnLeave", function(s)
+                    if s.isActive then
+                        s:SetBackdropColor(0.22, 0.19, 0.12, 0.95)
+                        s:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+                    else
+                        s:SetBackdropColor(0.10, 0.12, 0.15, 0.50)
+                        s:SetBackdropBorderColor(unpack(COLORS.goldMuted))
+                    end
+                end)
+                menu.buttons[i] = b
+            end
+
+            b:ClearAllPoints()
+            b:SetPoint("TOPLEFT", menu.scrollChild, "TOPLEFT", 2, -((i - 1) * btnHeight))
+            b:SetPoint("RIGHT", menu.scrollChild, "RIGHT", -2, 0)
+
+            local isActive = (itm.key == curVal or itm.value == curVal)
+            b.isActive = isActive
+            if isActive then
+                selectedIndex = i
+                b.text:SetText("|cFFFFD100✔ |r" .. itm.label)
+                b:SetBackdropColor(0.22, 0.19, 0.12, 0.95)
+                b:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+            else
+                b.text:SetText("   " .. itm.label)
+                b:SetBackdropColor(0.10, 0.12, 0.15, 0.50)
+                b:SetBackdropBorderColor(unpack(COLORS.goldMuted))
+            end
+
+            if isFont and LSM then
+                local fPath = LSM:Fetch("font", itm.key, true)
+                if fPath then
+                    pcall(function() b.text:SetFont(fPath, 11, "") end)
+                end
+            else
+                b.text:SetFontObject("GameFontHighlightSmall")
+            end
+
+            local chosenKey = itm.key
+            local chosenOpt = itm
+            b:SetScript("OnClick", function()
+                PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+                if setFunc then
+                    setFunc(chosenKey, chosenOpt)
+                end
+                UpdateLabel()
+                menu:Hide()
+            end)
+            b:Show()
+        end
+
+        local menuHeight = (visibleCount * btnHeight) + 8
+        menu:SetSize(menuWidth, menuHeight)
+
+        local screenHeight = UIParent:GetHeight() or 768
+        local btnBottom = self:GetBottom() or (screenHeight / 2)
+        menu:ClearAllPoints()
+        if btnBottom < (menuHeight + 20) then
+            menu:SetPoint("BOTTOMLEFT", self, "TOPLEFT", 0, 2)
+        else
+            menu:SetPoint("TOPLEFT", self, "BOTTOMLEFT", 0, -2)
+        end
+
+        menu:Show()
+        menu:Raise()
+
+        if hasScroll then
+            local scrollPos = math.max(0, math.min(totalContentHeight - (visibleCount * btnHeight), (selectedIndex - 1) * btnHeight))
+            menu.scrollFrame:SetVerticalScroll(scrollPos)
+        else
+            menu.scrollFrame:SetVerticalScroll(0)
+        end
     end)
 
     btn.Sync = UpdateLabel
     UpdateLabel()
     return btn
+end
+
+local function CreateStyledFontDropdown(parent, labelPrefix, width, height, getFunc, setFunc, tooltipText)
+    return CreateStyledDropdown(parent, labelPrefix, width, height, GetAvailableFonts, getFunc, setFunc, tooltipText, true)
+end
+
+-- Backward compatibility alias
+local function CreateStyledCycleButton(parent, labelPrefix, width, height, optionsList, getFunc, setFunc, tooltipText)
+    return CreateStyledDropdown(parent, labelPrefix, width, height, optionsList, getFunc, setFunc, tooltipText)
 end
 
 --[[-----------------------------------------------------------------------------
@@ -591,13 +854,13 @@ function BFM:BuildMinimapTab(content, syncList, isEmbed)
     CreateSectionHeader(content, "APPEARANCE & BORDER", 12, yOfs)
     yOfs = yOfs - 34
 
-    local borderStyleBtn = CreateStyledCycleButton(content, "Border", 200, 22, BORDER_STYLES,
+    local borderStyleBtn = CreateStyledDropdown(content, "Border", 200, 22, BORDER_STYLES,
         function() return BFM.db.minimap.borderStyle or "flat" end,
         function(val)
             BFM.db.minimap.borderStyle = val
             BFM:ApplySettings()
         end,
-        "Cycle between available border styles:\n• Flat: Sleek pixel-perfect border\n• Blizzard Tooltip: Rounded tooltip corners\n• Blizzard Dialog: Classic window border\n• None: Clean borderless edge"
+        "Select from available border styles:\n• Flat: Sleek pixel-perfect border\n• Blizzard Tooltip: Rounded tooltip corners\n• Blizzard Dialog: Classic window border\n• None: Clean borderless edge"
     )
     borderStyleBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
     table.insert(syncList, borderStyleBtn)
@@ -781,7 +1044,46 @@ function BFM:BuildMinimapTab(content, syncList, isEmbed)
     note1:SetText("Updates at throttled 0.1s rate. Automatically hidden if Quest Tracker Location Bar is active.")
     note1:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
 
+    yOfs = yOfs - 42
+
+    local minimapFontDropdown = CreateStyledFontDropdown(content, "Font", 210, 22,
+        function() return BFM.db.minimap.coordsFont or "Nata Sans Bold" end,
+        function(val)
+            BFM.db.minimap.coordsFont = val
+            BFM:ApplySettings()
+        end,
+        "Select the typography face for minimap coordinates and subzone bar."
+    )
+    minimapFontDropdown:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, minimapFontDropdown)
+
+    local minimapOutlineDropdown = CreateStyledDropdown(content, "Outline", 150, 22, OUTLINE_OPTIONS,
+        function() return BFM.db.minimap.coordsFontOutline or "OUTLINE" end,
+        function(val)
+            BFM.db.minimap.coordsFontOutline = val
+            BFM:ApplySettings()
+        end,
+        "Select the font outline rendering style for minimap coordinates."
+    )
+    minimapOutlineDropdown:SetPoint("TOPLEFT", content, "TOPLEFT", 240, yOfs)
+    table.insert(syncList, minimapOutlineDropdown)
+
     yOfs = yOfs - 48
+
+    local minimapFontSizeSlider = CreateStyledSlider(content, pfx .. "CoordsFontSize", "Coordinates Font Size:",
+        "Controls the font size for minimap subzone and coordinates text (8 - 18 pt).",
+        8, 18, 1,
+        function() return BFM.db.minimap.coordsFontSize or 10 end,
+        function(val)
+            BFM.db.minimap.coordsFontSize = val
+            BFM:ApplySettings()
+        end,
+        "%d pt"
+    )
+    minimapFontSizeSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, minimapFontSizeSlider)
+
+    yOfs = yOfs - 55
     content:SetHeight(math.abs(yOfs))
 end
 
@@ -812,7 +1114,46 @@ function BFM:BuildWorldMapTab(content, syncList, isEmbed)
     note2:SetText("Uses modern MapCanvasDataProviderMixin architecture with normalized canvas projection.")
     note2:SetTextColor(COLORS.dimText[1], COLORS.dimText[2], COLORS.dimText[3])
 
-    yOfs = yOfs - 50
+    yOfs = yOfs - 42
+
+    local worldFontDropdown = CreateStyledFontDropdown(content, "Font", 210, 22,
+        function() return BFM.db.worldmap.coordsFont or "Nata Sans Bold" end,
+        function(val)
+            BFM.db.worldmap.coordsFont = val
+            BFM:ApplySettings()
+        end,
+        "Select the typography face for world map coordinates overlay."
+    )
+    worldFontDropdown:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, worldFontDropdown)
+
+    local worldOutlineDropdown = CreateStyledDropdown(content, "Outline", 150, 22, OUTLINE_OPTIONS,
+        function() return BFM.db.worldmap.coordsFontOutline or "OUTLINE" end,
+        function(val)
+            BFM.db.worldmap.coordsFontOutline = val
+            BFM:ApplySettings()
+        end,
+        "Select the font outline rendering style for world map coordinates."
+    )
+    worldOutlineDropdown:SetPoint("TOPLEFT", content, "TOPLEFT", 240, yOfs)
+    table.insert(syncList, worldOutlineDropdown)
+
+    yOfs = yOfs - 48
+
+    local worldFontSizeSlider = CreateStyledSlider(content, pfx .. "WorldCoordsFontSize", "Coordinates Font Size:",
+        "Controls the font size for world map player and cursor coordinate labels (8 - 20 pt).",
+        8, 20, 1,
+        function() return BFM.db.worldmap.coordsFontSize or 11 end,
+        function(val)
+            BFM.db.worldmap.coordsFontSize = val
+            BFM:ApplySettings()
+        end,
+        "%d pt"
+    )
+    worldFontSizeSlider:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
+    table.insert(syncList, worldFontSizeSlider)
+
+    yOfs = yOfs - 55
 
     -- Section 2: Fog of War / Map Reveal
     CreateSectionHeader(content, "FOG OF WAR / MAP REVEAL", 12, yOfs)
@@ -857,7 +1198,7 @@ function BFM:BuildWorldMapTab(content, syncList, isEmbed)
     end, "Choose a custom color tint and opacity for unvisited map overlays.")
     fogColorBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 16, yOfs)
 
-    local presetBtn = CreateStyledCycleButton(content, "Preset", 190, 22, FOG_PRESETS,
+    local presetBtn = CreateStyledDropdown(content, "Preset", 190, 22, FOG_PRESETS,
         function()
             local curC = BFM.db.worldmap.fogColor or {}
             local curA = BFM.db.worldmap.fogAlpha or 0.60
@@ -879,7 +1220,7 @@ function BFM:BuildWorldMapTab(content, syncList, isEmbed)
                 if fogAlphaSlider and fogAlphaSlider.Sync then fogAlphaSlider:Sync() end
             end
         end,
-        "Cycle through curated visual presets for unexplored territory."
+        "Select from curated visual presets for unexplored territory."
     )
     presetBtn:SetPoint("TOPLEFT", content, "TOPLEFT", 180, yOfs)
     table.insert(syncList, presetBtn)

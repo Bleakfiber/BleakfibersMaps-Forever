@@ -26,6 +26,9 @@ local defaultProfileSettings = {
         showCoords = true,
         showZone = true,
         infoBarHeight = 18,
+        coordsFont = "Nata Sans Bold",
+        coordsFontSize = 10,
+        coordsFontOutline = "OUTLINE",
     },
     worldmap = {
         showCoords = true,
@@ -34,6 +37,9 @@ local defaultProfileSettings = {
         fogClear = true,
         fogColor = { r = 0.90, g = 0.90, b = 1.00 },
         fogAlpha = 0.60,
+        coordsFont = "Nata Sans Bold",
+        coordsFontSize = 11,
+        coordsFontOutline = "OUTLINE",
     },
 }
 
